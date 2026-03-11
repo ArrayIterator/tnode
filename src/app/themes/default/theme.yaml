@@ -1,0 +1,44 @@
+#! --------------------------------------------------------------
+# Theme information.
+# This file is required for the theme to work.
+# see the schema/theme.json for more information.
+#! --------------------------------------------------------------
+name: T Node Default
+version: 1.0.0-alpha
+description: "A Default theme for Tray Node"
+screenshot: screenshot.png
+url: https://github.com/arrayiterator/Tray-Node
+#
+#! The theme author information.
+# --------------------------------------------------------------
+author:
+  name: ArrayIterator
+  email: arrayiterator@gmail.com
+  url: https://github.com/arrayiterator
+#
+# The directories of the theme.
+# Additional names can be added and will be pointed as includes.
+# --------------------------------------------------------------
+directories:
+  # The directory name of the assets. Should without leading or trailing slash. This will be publicly accessible  via /themes/<assets>/...
+  assets: assets
+  # The directory name of the language. Should without leading or trailing slash.
+  language: languages
+  # The partials directory name. Should without leading or trailing slash. Directory path inside the theme folder: themes/<theme_name>/<partials>
+  partials: partials
+#
+# The templates of the theme.
+# The file extension should be .hbs.
+# Additional names can be added and will be pointed as include template files using {{> template_name}}
+# --------------------------------------------------------------
+templates:
+  not_found: "404"
+  layout: "main"
+  error: "error"
+  index: "index"
+  page: "page"
+  archive: "archive"
+  post: "post"
+  search: "search"
+  header: "partials/header"
+  footer: "partials/footer"

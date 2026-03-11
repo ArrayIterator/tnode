@@ -1,0 +1,58 @@
+# Editor - Swap Files
+# Nano
+.nano*.swp
+.nanorc
+
+# Vim
+.*.swp
+.*.swo
+[._]*.swo
+[._]*.swp
+[._]*.swn
+[._]*.swm
+
+# Temporary / Backup
+*~
+*.bak
+*.tmp
+*.old
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# System
+.wget-hsts
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+node_modules/
+
+# Root
+/target
+/storage
+/var
+/temp
+vendor/
+.idea/
+config.yaml
+.env
+_temp/

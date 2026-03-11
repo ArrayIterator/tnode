@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+{{#with language}}
+    <html lang="{{#if locale}}{{locale}}{{else}}en-US{{/if}}" dir="{{#if direction}}{{direction}}{{else}}ltr{{/if}}">
+{{else}}
+    <html lang="en-US" dir="ltr">
+{{/with}}
+<head>
+    <meta charset="{{#if charset}}{{charset}}{{else}}UTF-8{{/if}}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    {{{ head }}}
+</head>
+<body>
+<div id="root" class="root-container">{{{ body }}}</div>
+{{{ footer }}}
+</body>
+</html>

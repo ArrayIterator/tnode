@@ -1,0 +1,139 @@
+[package]
+name = "tnode"
+version = "0.1.0-alpha.1"
+edition = "2024"
+publish = false
+repository = "https://github.com/ArrayIterator/tnode"
+authors = [
+    "ArrayIterator <arrayiterator@gmail.com>"
+]
+license = "Apache-2.0"
+build = "build.rs"
+# for help display
+description = """
+________   _____   __________________________
+___  __/   ___  | / /_  __ \\__  __ \\__  ____/
+__  /________   |/ /_  / / /_  / / /_  __/
+_  /_/_____/  /|  / / /_/ /_  /_/ /_  /___
+/_/        /_/ |_/  \\____/ /_____/ /_____/
+
+High-Performance Unified Management System
+ """
+
+[workspace]
+members = []
+
+[dependencies]
+# Web & Async
+actix-web = { version = "4", features = ["rustls-0_23", "secure-cookies"] }
+actix-ws = "0.4"
+actix-service = "2.0"
+actix-multipart = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+
+# Database & Data
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "tls-rustls-ring-webpki", "migrate", "json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
+r2d2 = "0.8"
+scheduled-thread-pool = "0.2"
+redis = { version = "1.0", features = ["tokio-comp", "r2d2"] }
+opendal = { version = "0.55", features = ["services-s3", "services-ftp", "services-gdrive"] }
+lz4_flex = "0.12"
+zip = "8.1"
+urlencoding = "2.1"
+polib = "0.3"
+base64 = "0.22"
+base32 = "0.5"
+quick-xml = "0.39"
+tar = "0.4"
+flate2 = "1.1"
+csv = "1.4"
+
+# Network & DNS
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "multipart", "hickory-dns"] }
+hickory-resolver = { version = "0.25.2", features = ["serde", "https-ring", "webpki-roots", "tokio"] }
+addr = { version = "0.15", features = ["idna", "publicsuffix"] }
+url = "2.5"
+maxminddb = "0.27"
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls", "smtp-transport", "dkim", "builder", "rustls-tls", "hostname"] }
+
+# Cryptography
+bcrypt = "0.19"
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+totp-rs = { version = "5.7", features = ["qr", "steam", "otpauth"] }
+hmac = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+rand = "0.10"
+rustls-pki-types = "1.14"
+rustls-pemfile = "2.2"
+rcgen = "0.14.7"
+instant-acme = { version = "0.8", features = ["aws-lc-rs"] }
+x509-certificate = "0.25"
+aws-lc-rs = { version = "1", features = ["fips"] }
+
+# Assets util
+image = "0.25"
+imagesize = "0.14"
+infer = "0.19"
+mime = "0.3"
+
+# Terminal
+clap = { version = "4.5", features = ["derive", "string"] }
+ratatui = "0.30"
+crossterm = "0.29"
+terminal_size = "0.4"
+colored = "3.1"
+comfy-table = "7.2"
+
+# System
+nix = { version = "0.31", features = ["user", "process", "signal"] }
+rlimit = "0.11"
+sysinfo = "0.38"
+caps = "0.5"
+
+# Log
+log = { version = "0.4" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "tracing-log"] }
+
+# Utilities
+handlebars = "6.4"
+const_format = "0.2"
+regex = "1.12"
+semver = { version = "1.0", features = ["serde"] }
+path-clean = "1.0"
+coarsetime = "0.1"
+rust-embed = "8.11"
+futures-util = "0.3"
+dashmap = "6.1.0"
+chrono = { version = "0.4", features = ["serde"] }
+humantime = "2.3"
+php_serde = "0.6"
+walkdir = "2.5"
+fs2 = "0.4"
+
+[profile.release]
+lto = true
+strip = true
+opt-level = 3
+panic = 'abort'
+codegen-units = 1
+overflow-checks = true
+debug = false
+incremental = false
+
+[build-dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+# Feature 'default'
+default = ["prod"]
+# Feature 'prod'
+prod = [
+]

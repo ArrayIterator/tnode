@@ -1,0 +1,179 @@
+# ----------------------------------------
+# BEGIN CONFIGURATION
+# ----------------------------------------
+#
+# ----------------------------------------
+# Application configuration
+app:
+  # Application mode
+  # development or production
+  # Default: production
+  mode: "production"
+  # Session name
+  #  used to store session id in cookie
+  # session name must be ([a-zA-Z0-9_-]+)
+  # default: vault
+  session_name: vault
+  # CSRF token duration in minutes
+  # minimum: 5 minutes, maximum: 86400 (1 day)
+  # default: 30 minutes
+  csrf_durations: 30
+  # Secret key used to encrypt the sensitive content / data
+  # default: (empty)
+  secret_key: "change-this-to-a-random-secret-string"
+  # Salt key used to encrypt sensitive data
+  # default: (empty)
+  salt_key: "change-this-to-a-random-salt-string"
+  # Default user run as (affected on root permissions)
+  # default: (empty) auto-detect binary owner
+  user: ""
+  # List of TCP Listen addresses
+  # used for multiple binding
+  # only localhost is supported for non-IP addresses
+  # Default: [127.0.0.1:55155]
+  tcp:
+    - "127.0.0.1:55080"
+  # SSL Configuration
+  # 443 always
+  ssl:
+    listen:
+      - "127.0.0.1:55443"
+    cert: ""
+    key: ""
+    # SSL Session cache size in MB
+    # minimum: 2, maximum: 256
+    # default : 32
+    ssl_session_cache: 32
+  # Max worker
+  # default: 0 (auto detect - use available cores)
+  workers: 0
+  # Operation timeout in seconds for non websocket operations
+  # minimum: 1, maximum: 3600
+  # Default: 10
+  operation_timeout: 10
+  # Request timeout in seconds
+  # minimum: 0, maximum: 3600
+  # Default: 10
+  # 0 mean disable
+  request_timeout: 10
+  # Disconnect timeout in seconds
+  # minimum: 0, maximum: 3600
+  # Default: 5
+  disconnect_timeout: 5
+  # Maximum number of concurrent connections
+  # maximum: 65535, minimum: 128
+  # Default: 25K / 25000
+  max_connections: 25000
+  # Sets the per-worker maximum concurrent TLS connection limit.
+  # All listeners will stop accepting connections when this limit is reached. It can be used to limit the global TLS CPU usage.
+  # minimum: 32, maximum: 65535
+  # Default: 0 (auto calculation)
+  max_connections_rate: 0
+  # Backlog size for the server socket
+  # maximum: 65535, minimum: 128 (maximum recommended is: 8192)
+  # Default: 4096
+  backlog: 4096
+  # Rlimit nofile
+  # The maximum number of open file descriptors that the process can have.
+  # maximum: 1048576, minimum: 4096
+  # Default: 65535
+  rlimit_nofile: 65535
+  # Keep-alive connection
+  # minimum: 0, maximum: 7200
+  # Default: 75
+  # 0 means disabled
+  keep_alive: 75
+  # Auto clean memory
+  # Default: true
+  auto_clean_memory: true
+  # Auto clean memory threshold
+  # minimum: 128MB
+  # Default: 384MB
+  # Without unit it will be used bytes as unit
+  auto_clean_memory_size: "384M"
+  # Auto clean memory interval in seconds
+  # If you need to use this feature, recommended using every 5 minutes (300)
+  # minimum: 30 (30 seconds), maximum: 1 month = 30 days * 24 hours * 60 minutes
+  # Default: 1H
+  # Without unit it will be used second as unit
+  # Uppercase M as Month, as lowercase m as Minute
+  auto_clean_memory_interval: "1H"
+# ----------------------------------------
+# Database configuration
+# Database connection pool settings
+# Use PostgreSQL
+database:
+  # Unix socket path
+  # Default: (empty)
+  socket: null
+  # Database host
+  # Default: localhost
+  host: localhost
+  # Database port
+  # Default: 5432
+  port: 5432
+  # Database username
+  # Default: (empty)
+  username: ""
+  # Database password
+  password: ""
+  # Database name
+  # Default: (empty)
+  database: ""
+  # Maximum number of connections in the pool
+  # Default: 50
+  max_connections: 50
+  # Minimum number of idle connections in the pool
+  # Default: 1
+  min_connections: 1
+  # Connection acquisition timeout in seconds
+  # Default: 1800
+  max_lifetime: 1800
+  # Idle connection timeout in seconds
+  # Default: 600
+  idle_timeout: 600
+  # Connection timeout in seconds
+  # Default: 10
+  acquire_timeout: 10
+  # Enable logging
+  # Default: false
+  log_enable: false
+  # Log level
+  # debug, info, warn, error, off
+  # Default: Warn
+  log_level: "warn"
+  # Log slow queries
+  # debug, info, warn, error, off
+  # Default: error
+  log_slow_level: "error"
+  # Log threshold in seconds
+  # Default: 1
+  log_threshold: 1
+# ----------------------------------------
+# AI MODELS
+# Model for AI
+# ct2rs: ct2rs model - object based name
+# onnx: onnx model - object based name
+models:
+  # Based On Model Directory
+  ct2rs:
+    # https://huggingface.co/arrayiterator/nllb-200-distilled-1.3B-ct2-int8
+    # https://huggingface.co/arrayiterator/nllb-200-3.3B-ct2-int8
+    nllb-200: ""
+    # https://huggingface.co/arrayiterator/faster-whisper-large-v3-turbo-int8-ct2
+    whisper: ""
+  # Based on Model File Name
+  onnx:
+    # placeholder
+    example: ""
+# ----------------------------------------
+# Licenses / API Key based on requirements
+#
+licenses:
+  # maxmind geo api key
+  maxmind: ""
+  # put any other license configuration here
+
+# ----------------------------------------
+# END
+# ----------------------------------------
