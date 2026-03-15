@@ -1,18 +1,27 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use reqwest::Method;
-use reqwest::header::HeaderMap;
+use bytes::Bytes;
+use reqwest::{ClientBuilder, Method};
+use reqwest::header::{HeaderMap, HeaderValue};
 use url::Url;
 use crate::cores::downloader::download_manager::DownloadManager;
 use crate::cores::downloader::metadata::MetaData;
 use crate::cores::downloader::progress::Progress;
-use crate::cores::downloader::status::Status;
-use crate::cores::net::dns::Dns;
-use crate::cores::system::error::{Error, ResultError};
+use crate::cores::downloader::state::State;
+use crate::cores::net::dns::{DnsChoice};
+use crate::cores::system::error::{ResultError};
 
-// todo: implement download with hickory
 pub type FunctionExecuteProgress = fn(&Progress) -> ResultError<()>;
 pub type ArcFunctionExecuteProgress = Arc<FunctionExecuteProgress>;
+
+pub type FunctionExcuteDownload = fn(&Progress, usize, Bytes) -> ResultError<bool>;
+pub type ArcFunctionExecuteDownload = Arc<FunctionExcuteDownload>;
+
+pub type FunctionClientBuilderFallback = fn(ClientBuilder) -> ResultError<ClientBuilder>;
+pub type ArcFunctionClientBuilderFallback = Arc<FunctionClientBuilderFallback>;
 
 struct DownloadGuard {
     item: Arc<Item>,
@@ -20,46 +29,54 @@ struct DownloadGuard {
 
 impl Drop for DownloadGuard {
     fn drop(&mut self) {
-        let mut progress = self.item.get_progress();
-        if !progress.is_finished() {
-            progress.mark_as_cancelled("Download was dropped without completion or failure");
+        if let Some(state) = self.item.state.get() {
+            if !state.is_finished() {
+                state.cancel("Download was dropped without completion or failure").ok();
+            }
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Item {
-    download_manager: Arc<DownloadManager>,
-    metadata: Arc<MetaData>,
-    progress: Arc<Progress>,
-    dns: Option<Arc<Dns>>,
-    on_start: Option<ArcFunctionExecuteProgress>,
-    on_progress: Option<ArcFunctionExecuteProgress>,
-    on_complete: Option<ArcFunctionExecuteProgress>,
-    on_fail: Option<ArcFunctionExecuteProgress>,
-    on_cancel: Option<ArcFunctionExecuteProgress>,
-    on_finally: Option<ArcFunctionExecuteProgress>,
+    pub(crate) download_manager: Arc<DownloadManager>,
+    pub(crate) metadata: Arc<MetaData>,
+    pub(crate) dns: Option<Arc<DnsChoice>>,
+    pub(crate) builder_fallback: Option<ArcFunctionClientBuilderFallback>,
+    pub(crate) on_start: Option<ArcFunctionExecuteProgress>,
+    pub(crate) on_progress: Option<ArcFunctionExecuteProgress>,
+    pub(crate) on_download_progress: Option<ArcFunctionExecuteDownload>,
+    pub(crate) on_complete: Option<ArcFunctionExecuteProgress>,
+    pub(crate) on_fail: Option<ArcFunctionExecuteProgress>,
+    pub(crate) on_cancel: Option<ArcFunctionExecuteProgress>,
+    pub(crate) on_finish: Option<ArcFunctionExecuteProgress>,
+    pub(crate) state: Arc<OnceLock<Arc<State>>>,
 }
 
 impl Item {
-    pub(crate) fn new(
+    pub(crate) fn new<D: Into<Arc<DnsChoice>>>(
         download_manager: Arc<DownloadManager>,
-        dns: Option<Arc<Dns>>,
+        dns: Option<D>,
         url: Url,
         method: Method,
-        headers: Option<reqwest::header::HeaderMap<String>>,
+        headers: Option<HeaderMap<HeaderValue>>,
         filename: Option<String>,
         max_retries: usize,
         max_redirects: usize,
         follow_redirect: bool,
-        timeouts: Duration,
+        timeout: Duration,
+        connect_timeout: Duration,
+        insecure: bool,
+        domain_resolve: Option<HashMap<String, Vec<SocketAddr>>>,
         on_start: Option<ArcFunctionExecuteProgress>,
         on_progress: Option<ArcFunctionExecuteProgress>,
+        on_download_progress: Option<ArcFunctionExecuteDownload>,
         on_complete: Option<ArcFunctionExecuteProgress>,
         on_fail: Option<ArcFunctionExecuteProgress>,
         on_cancel: Option<ArcFunctionExecuteProgress>,
-        on_finally: Option<ArcFunctionExecuteProgress>,
-    ) -> Self {
+        on_finish: Option<ArcFunctionExecuteProgress>,
+        builder_fallback: Option<Arc<FunctionClientBuilderFallback>>,
+    ) -> Self where Self: Sized {
         let metadata = Arc::new(MetaData::new(
             &url,
             method,
@@ -68,164 +85,140 @@ impl Item {
             follow_redirect,
             max_redirects,
             max_retries,
-            timeouts,
+            timeout,
+            connect_timeout,
+            insecure,
+            domain_resolve
         ));
         Self {
             download_manager: download_manager.clone(),
             metadata: metadata.clone(),
-            progress: Progress::use_default(download_manager, metadata).into_arc(),
-            dns,
+            dns: dns.map(|e|e.into()),
             on_start,
             on_progress,
+            on_download_progress,
             on_complete,
             on_fail,
             on_cancel,
-            on_finally,
+            on_finish,
+            builder_fallback,
+            state: Arc::new(OnceLock::new()),
         }
-    }
-    pub fn get_id(&self) -> &str {
-        self.metadata.get_id()
-    }
-    pub fn get_dns(&self) -> Option<Arc<Dns>> {
-        self.dns.clone()
-    }
-    pub fn get_progress(&self) -> Arc<Progress> {
-        self.progress.clone()
     }
     pub fn get_metadata(&self) -> Arc<MetaData> {
         self.metadata.clone()
     }
-    pub fn get_max_retries(&self) -> usize {
-        self.metadata.get_max_retries()
+    pub fn get_dns(&self) -> Option<Arc<DnsChoice>> {
+        self.dns.clone()
     }
-    pub fn get_max_redirects(&self) -> usize {
-        self.metadata.get_max_redirects()
-    }
-    pub fn get_follow_redirect(&self) -> bool {
-        self.metadata.get_follow_redirect()
-    }
-    pub fn get_timeouts(&self) -> Duration {
-        self.metadata.get_timeouts()
-    }
-    pub fn get_url(&self) -> &Url {
-        self.metadata.get_uri()
-    }
-    pub fn get_method(&self) -> &Method {
-        self.metadata.get_method()
-    }
-    pub fn get_headers(&self) -> Option<Arc<HeaderMap<String>>> {
-        self.metadata.get_headers()
-    }
-    pub fn get_filename(&self) -> Option<String> {
-        self.metadata.get_filename()
+    pub fn get_id(&self) -> &str {
+        self.metadata.get_id()
     }
     pub fn get_download_manager(&self) -> Arc<DownloadManager> {
         self.download_manager.clone()
     }
-    pub fn get_status(&self) -> Arc<Status> {
-        self.progress.get_status()
-    }
-    pub fn is_pending(&self) -> bool {
-        self.progress.is_pending()
-    }
-    pub fn is_in_progress(&self) -> bool {
-        self.progress.is_in_progress()
-    }
-    pub fn is_completed(&self) -> bool {
-        self.progress.is_completed()
-    }
-    pub fn is_failed(&self) -> bool {
-        self.progress.is_failed()
-    }
-    pub fn is_cancelled(&self) -> bool {
-        self.progress.is_cancelled()
-    }
-    pub fn is_finished(&self) -> bool {
-        self.progress.is_finished()
+    pub fn get_state(self: &Arc<Self>) -> Arc<State> {
+        self.state.get_or_init(|| Arc::new(State::new(self.clone()))).clone()
     }
 }
 
-impl Item {
-    fn execute_on_start(&self) -> ResultError<()> {
-        if let Some(on_start) = &self.on_start {
-            on_start(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    fn execute_on_progress(&self) -> ResultError<()> {
-        if let Some(on_progress) = &self.on_progress {
-            on_progress(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    fn execute_on_complete(&self) -> ResultError<()> {
-        if let Some(on_complete) = &self.on_complete {
-            on_complete(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    fn execute_on_fail(&self) -> ResultError<()> {
-        if let Some(on_fail) = &self.on_fail {
-            on_fail(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    fn execute_on_cancel(&self) -> ResultError<()> {
-        if let Some(on_cancel) = &self.on_cancel {
-            on_cancel(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    fn execute_on_finally(&self) -> ResultError<()> {
-        if let Some(on_finally) = &self.on_finally {
-            on_finally(&self.progress)
-        } else {
-            Ok(())
-        }
-    }
-    pub(crate) fn execute<T, Finish, Fut>(self: &Arc<Self>, func: Finish) -> impl Future<Output = ResultError<T>> + Send
-    where
-        Finish: Fn(&Self) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ResultError<T>> + 'static + Send,
-    {
-        async move {
-            match self.get_status().as_ref() {
-                Status::InProgress => {
-                    return Err(Error::invalid_state("Download is already in progress!"));
-                },
-                Status::Completed => {
-                    return Err(Error::invalid_state("Download is already completed!"));
-                },
-                Status::Cancelled(_) => {
-                    return Err(Error::invalid_state("Download is already cancelled!"));
-                },
-                Status::Failed(error) => {
-                    return Err(Error::invalid_state(format!("Download has already failed with error: {}", error)));
-                },
-                _ => {}
-            }
-            let dm = self.get_download_manager();
-            let id = self.get_id();
-            let is_full = !dm.has(id) && dm.is_full();
-            if is_full {
-                return Err(Error::invalid_state("Download queue is full!"));
-            }
-            let _guard = DownloadGuard { item: self.clone() };
-            match self.execute_on_start() {
-                Ok(_) => {},
-                Err(e) => {
-                    self.get_progress().mark_as_failed(e.clone());
-                    return Err(e);
-                }
-            }
-            dm.attach(self.clone());
-            let r = func(&self).await;
-            r
-        }
+impl Deref for Item {
+    type Target = MetaData;
+    fn deref(&self) -> &Self::Target {
+        &self.metadata
     }
 }
+
+// impl Item {
+//     fn execute_on_start(&self) -> ResultError<()> {
+//         if let Some(on_start) = &self.on_start {
+//             on_start(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     fn execute_on_progress(&self) -> ResultError<()> {
+//         if let Some(on_progress) = &self.on_progress {
+//             on_progress(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     fn execute_on_download_progress(&self, downloaded: usize, chunk: Bytes) -> ResultError<bool> {
+//         if let Some(on_download_progress) = &self.on_download_progress {
+//             on_download_progress(&self.progress, downloaded, chunk)
+//         } else {
+//             Ok(true)
+//         }
+//     }
+//     fn execute_on_complete(&self) -> ResultError<()> {
+//         if let Some(on_complete) = &self.on_complete {
+//             on_complete(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     fn execute_on_fail(&self) -> ResultError<()> {
+//         if let Some(on_fail) = &self.on_fail {
+//             on_fail(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     fn execute_on_cancel(&self) -> ResultError<()> {
+//         if let Some(on_cancel) = &self.on_cancel {
+//             on_cancel(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     fn execute_on_finally(&self) -> ResultError<()> {
+//         if self.finally_dispatched.swap(true, Ordering::SeqCst) {
+//             return Ok(()); // already dispatched, just return ok
+//         }
+//         if let Some(on_finally) = &self.on_finish {
+//             on_finally(&self.progress)
+//         } else {
+//             Ok(())
+//         }
+//     }
+//     pub fn cancel(&self, reason: Option<String>) -> ResultError<()> {
+//         if self.atomic_cancel.load(Ordering::SeqCst) {
+//             return Err(Error::invalid_state("Download is already cancelled!"));
+//         }
+//         let mut progress = self.get_progress();
+//         match progress.get_status().as_ref() {
+//             Status::Cancelled(_) => {
+//                 return Err(Error::invalid_state("Download is already cancelled!"));
+//             },
+//             Status::Failed(error) => {
+//                 return Err(Error::invalid_state(format!("Download has already failed with error: {}", error)));
+//             },
+//             Status::Completed => {
+//                 return Err(Error::invalid_state("Download is already completed!"));
+//             },
+//             _ => {
+//                 progress.mark_as_cancelled(reason.unwrap_or_else(|| "Cancelled by user".to_string()));
+//                 self.execute_on_cancel()?;
+//                 self.execute_on_finally()?;
+//                 return Ok(());
+//             },
+//         }
+//     }
+//     pub fn retry(&self) -> ResultError<()> {
+//         let mut progress = self.get_progress();
+//         if !progress.is_failed() {
+//             return Err(Error::invalid_state("Download is not in a failed state!"));
+//         }
+//         progress.reset(true);
+//         self.execute_on_progress()?;
+//         Ok(())
+//     }
+//     pub fn has_final_result(&self) -> bool {
+//         self.final_res.read().is_some()
+//     }
+//     pub fn get_final_result(&self) -> Option<Result<Arc<dyn Any + Send + Sync>, Arc<Error>>> {
+//         let final_res = self.final_res.read();
+//         final_res.clone()
+//     }
+// }

@@ -5,10 +5,10 @@ use crate::cores::system::error::Error;
 #[derive(Debug, Clone)]
 pub enum Status {
     Pending,
-    InProgress,
     Completed,
+    InProgress(String), // Include a message for progress updates
     Cancelled(String), // Include a reason for cancellation
-    Failed(Error),     // Include an error message for failed downloads
+    Failed(Arc<Error>),     // Include an error message for failed downloads
 }
 
 impl Status {
@@ -16,7 +16,7 @@ impl Status {
         matches!(self, Self::Pending)
     }
     pub fn is_in_progress(&self) -> bool {
-        matches!(self, Self::InProgress)
+        matches!(self, Self::InProgress(_))
     }
     pub fn is_completed(&self) -> bool {
         matches!(self, Self::Completed)
@@ -29,6 +29,16 @@ impl Status {
     }
     pub fn is_finished(&self) -> bool {
         !self.is_in_progress() && !self.is_pending()
+    }
+    pub fn is_error(&self) -> bool {
+        self.is_failed() || self.is_cancelled()
+    }
+    pub fn get_progress_message(&self) -> Option<&str> {
+        if let Self::InProgress(message) = self {
+            Some(message)
+        } else {
+            None
+        }
     }
     pub fn into_arc(self) -> Arc<Self> {
         Arc::new(self)
@@ -56,7 +66,7 @@ impl Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Status::Pending => write!(f, "Pending"),
-            Status::InProgress => write!(f, "In Progress"),
+            Status::InProgress(e) => write!(f, "Progress : {}", e),
             Status::Completed => write!(f, "Completed"),
             Status::Cancelled(reason) => write!(f, "Cancelled: {}", reason),
             Status::Failed(error) => write!(f, "Failed: {}", error),

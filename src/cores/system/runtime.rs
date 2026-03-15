@@ -3,6 +3,7 @@ use crate::cores::helper::file_info::FileInfo;
 use crate::cores::helper::user::{User, UserDetail};
 use crate::cores::runner::console::ConsoleArguments;
 use crate::cores::system::error::{Error, ResultError};
+use chrono::{DateTime, Utc};
 use const_format::concatcp;
 use nix::libc;
 use path_clean::PathClean;
@@ -147,8 +148,18 @@ pub static IS_CARGO: LazyLock<bool> = LazyLock::new(|| {
     }
     env::var("CARGO").is_ok() || env::var("CARGO_EXE").is_ok()
 });
-static IS_DAEMON_CACHE: OnceLock<bool> = OnceLock::new();
 
+static APP_DEFAULT_USER_AGENT: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "Mozilla/5.0 (X11; Linux {0}; rv:{1}) Gecko/20100101 {2}/{1}",
+        env::consts::ARCH,
+        APP_VERSION,
+        APP_NAME,
+    )
+});
+
+static IS_DAEMON_CACHE: OnceLock<bool> = OnceLock::new();
+static UTC_TIMESTAMP: OnceLock<DateTime<Utc>> = OnceLock::new();
 pub struct Runtime;
 
 impl Runtime {
@@ -172,6 +183,15 @@ impl Runtime {
     }
     pub fn app_build_timestamp() -> &'static str {
         APP_BUILD_TIMESTAMP
+    }
+    pub fn app_build_timestamp_utc() -> DateTime<Utc> {
+        UTC_TIMESTAMP.get_or_init(||{
+            let timestamp_i64 = APP_BUILD_TIMESTAMP.parse::<i64>().unwrap_or(0);
+            DateTime::<Utc>::from_timestamp_secs(timestamp_i64).unwrap_or_else(|| Utc::now())
+        }).clone()
+    }
+    pub fn app_default_user_agent() -> &'static str {
+        &APP_DEFAULT_USER_AGENT
     }
     pub fn app_build_timestamp_date() -> &'static str {
         APP_BUILD_TIMESTAMP_DATE

@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::Duration;
 
+// \u{000C} = \f, \u{000B} = \v
+pub const WHITESPACE_CHARS: &str = " \t\r\n\u{000C}\u{000B}";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct MemoryStat {
     pub vm_rss: usize,   // Resident Set Size (current)
@@ -40,6 +43,53 @@ impl Hack {
             }
         }
         (ts.tv_sec as u64) * 1_000_000_000 + (ts.tv_nsec as u64)
+    }
+
+    pub fn lc_first<T: Into<String>>(input: T) -> String {
+        let input = input.into();
+        if input.is_empty() {
+            return input;
+        }
+        let mut chars = input.chars();
+        let first_char = chars.next().unwrap().to_ascii_lowercase();
+        first_char.to_string() + chars.as_str()
+    }
+
+    pub fn uc_first<T: Into<String>>(input: T) -> String {
+        let input = input.into();
+        if input.is_empty() {
+            return input;
+        }
+        let mut chars = input.chars();
+        let first_char = chars.next().unwrap().to_ascii_uppercase();
+        first_char.to_string() + chars.as_str()
+    }
+
+    pub fn uc_words<T: AsRef<str>, S: AsRef<str>>(input: T, separators: Option<S>) -> String {
+        let input = input.as_ref();
+        let mut result = String::with_capacity(input.len());
+        let mut capitalize_next = true;
+        let is_separator = |c: char| {
+            if let Some(ref s) = separators {
+                s.as_ref().contains(c)
+            } else {
+                c.is_whitespace()
+            }
+        };
+        for c in input.chars() {
+            if is_separator(c) {
+                capitalize_next = true;
+                result.push(c);
+            } else if capitalize_next {
+                for upper in c.to_uppercase() {
+                    result.push(upper);
+                }
+                capitalize_next = false;
+            } else {
+                result.push(c);
+            }
+        }
+        result
     }
 
     fn clean_quoted_identifier<T: Into<String>>(input: T) -> String {
@@ -77,23 +127,16 @@ impl Hack {
     }
 
     pub fn escape_table_identifier<T: Into<String>>(input: T, quoted: bool) -> String {
-        let input = Self::clean_quoted_identifier(input);
-        let mut escaped = String::new();
+        let input: String = input.into();
+        let cleaned = Self::clean_quoted_identifier(input);
+        // Escaping double quotes in identifiers is done by doubling them: ""
+        let escaped = cleaned.replace('"', "\"\"");
+
         if quoted {
-            escaped.push('"');
+            format!("\"{}\"", escaped)
+        } else {
+            escaped
         }
-        for c in input.chars() {
-            if c == '"' {
-                escaped.push('"');
-                escaped.push('"');
-            } else {
-                escaped.push(c);
-            }
-        }
-        if quoted {
-            escaped.push('"');
-        }
-        escaped
     }
 
     pub fn escape_table_identifier_quote<T: Into<String>>(input: T) -> String {

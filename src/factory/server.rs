@@ -49,7 +49,7 @@ impl Drop for ConnGuard {
 
 pub struct StreamGuardBody {
     inner: BoxBody,
-    _ws_guard: ConnGuard, // Guard lo ada di sini
+    _ws_guard: ConnGuard,
     _req_guard: ConnGuard,
 }
 
@@ -66,27 +66,27 @@ impl MessageBody for StreamGuardBody {
         let inner_pin = Pin::new(&mut self.inner);
         inner_pin
             .poll_next(cx)
-            .map_err(|e| actix_web::error::Error::from(e))
+            .map_err(actix_web::error::Error::from)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Server {
     running: Arc<AtomicBool>,
-    processing: AtomicBool,
-    handle: RwLock<Option<ServerHandle>>,
-    start_time: AtomicU64,
+    processing: Arc<AtomicBool>,
+    handle: Arc<RwLock<Option<ServerHandle>>>,
+    start_time: Arc<AtomicU64>,
     global_requests: Arc<AtomicUsize>,
     total_requests: Arc<AtomicUsize>,
     current_connections: Arc<AtomicUsize>,
     websocket_alive: Arc<AtomicUsize>,
     websocket_requests: Arc<AtomicUsize>,
     total_worker: usize,
-    current_config: RwLock<Option<Arc<Config>>>,
+    current_config: Arc<RwLock<Option<Arc<Config>>>>,
     routes: Arc<Routes>,
     service_listener: Arc<EventManager>,
     middleware_manager: Arc<MiddlewareManager>,
-    tcp_socket: RwLock<Option<TcpSocket>>,
+    tcp_socket: Arc<RwLock<Option<TcpSocket>>>,
     start_counter: Arc<AtomicUsize>,
     next_auto_clean: Arc<AtomicIsize>,
 }
@@ -95,22 +95,22 @@ impl Server {
     pub fn new(routes: Arc<Routes>) -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
-            processing: AtomicBool::new(false),
-            handle: RwLock::new(None),
-            start_time: AtomicU64::new(0),
+            processing: Arc::new(AtomicBool::new(false)),
+            handle: Arc::new(RwLock::new(None)),
+            start_time: Arc::new(AtomicU64::new(0)),
             total_requests: Arc::new(AtomicUsize::new(0)),
             current_connections: Arc::new(AtomicUsize::new(0)),
             global_requests: Arc::new(AtomicUsize::new(0)),
             total_worker: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
-            current_config: RwLock::new(None),
+            current_config: Arc::new(RwLock::new(None)),
             routes: routes.clone(),
             websocket_alive: Arc::new(AtomicUsize::new(0)),
             websocket_requests: Arc::new(AtomicUsize::new(0)),
             service_listener: use_or_register_factory!(EventManager),
             middleware_manager: use_or_register_factory!(MiddlewareManager),
-            tcp_socket: RwLock::new(None),
+            tcp_socket: Arc::new(RwLock::new(None)),
             start_counter: Arc::new(AtomicUsize::new(0)),
             next_auto_clean: Arc::new(AtomicIsize::new(-1)),
         }

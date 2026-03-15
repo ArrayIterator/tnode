@@ -1,4 +1,4 @@
-use crate::cores::system::error::{Error, ResultError};
+use crate::cores::system::error::{ResultError, Error};
 use hickory_resolver::config::{LookupIpStrategy, ResolverConfig, ResolverOpts};
 use hickory_resolver::lookup::{Ipv4Lookup, Ipv6Lookup, Lookup, MxLookup, NsLookup, TxtLookup};
 use hickory_resolver::name_server::TokioConnectionProvider;
@@ -6,12 +6,17 @@ use hickory_resolver::proto::rr::RecordType;
 use hickory_resolver::proto::runtime::TokioRuntimeProvider;
 use hickory_resolver::{IntoName, ResolverBuilder, TokioResolver};
 use parking_lot::RwLock;
+use reqwest::dns::{Name, Resolve, Resolving};
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::net::{IpAddr, SocketAddr};
+use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Dns {
+    #[default]
     GoogleDoh,
     CloudflareDoh,
     Quad9Doh,
@@ -93,6 +98,7 @@ impl Dns {
         opt.ip_strategy = LookupIpStrategy::Ipv4Only;
         // dns lookup timeout is 5 seconds
         opt.timeout = Duration::from_secs(5);
+        opt.negative_min_ttl = Some(Duration::from_secs(5));
         let provider = TokioConnectionProvider::new(TokioRuntimeProvider::new());
         TokioResolver::builder_with_config(self.config(), provider).with_options(opt)
     }
@@ -511,5 +517,184 @@ impl Dns {
             .iter()
             .find(|r| r.record_type() == RecordType::CNAME)
             .map(|r| r.to_string()))
+    }
+}
+
+impl Resolve for Dns {
+    fn resolve(&self, name: Name) -> Resolving {
+        let this = self.clone();
+        Box::pin(async move {
+            let name_str = name.as_str();
+            let (host, port) = name_str.split_once(':')
+                .map(|(h, p)| (h, p.parse::<u16>().unwrap_or(80)))
+                .unwrap_or((name_str, 80));
+            // IPV4
+            let mut res = this.a_records(host).await
+                .map(|ips| ips.into_iter()
+                    .map(|ip| SocketAddr::new(IpAddr::V4(ip.0), port))
+                    .collect::<Vec<_>>()
+                );
+
+            // If IPv4 Failed, try IPv6
+            if res.is_err() {
+                if let Ok(ips_v6) = this.aaa_records(host).await {
+                    res = Ok(ips_v6.into_iter()
+                        .map(|ip| SocketAddr::new(IpAddr::V6(ip.0), port))
+                        .collect::<Vec<_>>()
+                    );
+                }
+            }
+            res.map(|addrs| {
+                let iter: Box<dyn Iterator<Item = SocketAddr> + Send + 'static> = Box::new(addrs.into_iter());
+                iter
+            })
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum IpChoice {
+    #[default]
+    Ipv4Only,
+    Ipv6Only,
+    Ipv4Preferred,
+    Ipv6Preferred,
+}
+
+#[derive(Debug, Clone)]
+pub struct DnsChoice {
+    inner: Arc<Dns>,
+    mode: Arc<RwLock<IpChoice>>
+}
+
+impl Default for DnsChoice {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(Dns::default()),
+            mode: Default::default()
+        }
+    }
+}
+
+impl DnsChoice {
+    pub fn new(dns: Dns) -> Self {
+        Self::new_arc(Arc::new(dns))
+    }
+
+    pub fn new_arc(dns: Arc<Dns>) -> Self {
+        Self {
+            inner: dns,
+            mode: Default::default()
+        }
+    }
+
+    pub fn set_mode(&self, mode: IpChoice) {
+        let mut m = self.mode.write();
+        *m = mode;
+    }
+
+    pub fn get_mode(&self) -> IpChoice {
+        *self.mode.read()
+    }
+
+    pub fn parse_name(&self, name: Name) -> (String, u16) {
+        let name_str = name.as_str();
+        name_str.split_once(':')
+            .map(|(h, p)| (h.to_string(), p.parse::<u16>().unwrap_or(80)))
+            .unwrap_or((name_str.to_string(), 80))
+    }
+
+    async fn resolve_ipv4(&self, parsed: &(String, u16)) -> Result<Vec<SocketAddr>, Error> {
+        let (host, port) = parsed.clone();
+        self.a_records(host).await
+            .map(|ips| ips.into_iter()
+                .map(|ip| SocketAddr::new(IpAddr::V4(ip.0), port))
+                .collect::<Vec<_>>()
+            )
+    }
+
+    async fn resolve_ipv6(&self, parsed: &(String, u16)) -> Result<Vec<SocketAddr>, Error> {
+        let (host, port) = parsed.clone();
+        self.aaa_records(host).await
+            .map(|ips| ips.into_iter()
+                .map(|ip| SocketAddr::new(IpAddr::V6(ip.0), port))
+                .collect::<Vec<_>>()
+            )
+    }
+    pub fn resolving(&self, name: Name) -> Resolving {
+        let this = self.clone();
+        Box::pin(async move {
+            let parsed = &this.parse_name(name);
+            match this.get_mode() {
+                IpChoice::Ipv4Only => this.resolve_ipv4(parsed).await,
+                IpChoice::Ipv6Only => this.resolve_ipv6(parsed).await,
+                IpChoice::Ipv4Preferred => {
+                    match this.resolve_ipv4(parsed).await {
+                        Ok(addrs) => Ok(addrs),
+                        Err(_) => this.resolve_ipv6(parsed).await,
+                    }
+                },
+                IpChoice::Ipv6Preferred => {
+                    match this.resolve_ipv6(parsed).await {
+                        Ok(addrs) => Ok(addrs),
+                        Err(_) => this.resolve_ipv4(parsed).await,
+                    }
+                },
+            }.map(|addrs| {
+                let iter: Box<dyn Iterator<Item = SocketAddr> + Send + 'static> = Box::new(addrs.into_iter());
+                iter
+            }).map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        })
+    }
+}
+
+impl Deref for DnsChoice {
+    type Target = Dns;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl Resolve for DnsChoice {
+    fn resolve(&self, name: Name) -> Resolving {
+        self.resolving(name)
+    }
+}
+
+impl From<Dns> for DnsChoice {
+    fn from(value: Dns) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<Arc<Dns>> for DnsChoice {
+    fn from(value: Arc<Dns>) -> Self {
+        Self::new_arc(value)
+    }
+}
+
+impl From<DnsChoice> for Dns {
+    fn from(value: DnsChoice) -> Self {
+        value.inner.as_ref().clone()
+    }
+}
+
+impl From<Arc<DnsChoice>> for Dns {
+    fn from(value: Arc<DnsChoice>) -> Self {
+        value.inner.as_ref().clone()
+    }
+}
+
+impl Into<Arc<DnsChoice>> for Dns {
+    fn into(self) -> Arc<DnsChoice> {
+        DnsChoice::new(self).into()
+    }
+}
+
+impl Into<Arc<Dns>> for DnsChoice {
+    fn into(self) -> Arc<Dns> {
+        self.inner.clone()
     }
 }

@@ -6,7 +6,7 @@ use parking_lot::RwLock;
 use crate::cores::downloader::download_manager::DownloadManager;
 use crate::cores::downloader::metadata::MetaData;
 use crate::cores::downloader::status::Status;
-use crate::cores::system::error::Error;
+use crate::cores::system::error::{Error, ResultError};
 
 #[derive(Debug, Clone)]
 pub struct Progress {
@@ -122,7 +122,7 @@ impl Progress {
         } else {
             match status {
                 Status::Pending|
-                Status::InProgress => {
+                Status::InProgress(_) => {
                     *self.status.write() = status.into_arc();
                 }
                 _ => {
@@ -168,7 +168,10 @@ impl Progress {
         self.is_pending() || self.get_downloaded() == 0
     }
     pub(crate) fn mark_as_started(&self) -> &Self {
-        self.mark_as(Status::InProgress)
+        self.mark_as(Status::InProgress("Download started".to_string()))
+    }
+    pub(crate) fn mark_progress<T: Into<String>>(&self, message: T) -> &Self {
+        self.mark_as(Status::InProgress(message.into()))
     }
     pub(crate) fn mark_as_completed(&self) -> &Self {
         self.mark_as(Status::Completed)
@@ -176,7 +179,7 @@ impl Progress {
     pub(crate) fn mark_as_cancelled<T: AsRef<str>>(&self, reason: T) -> &Self {
         self.mark_as(Status::Cancelled(reason.as_ref().to_string()))
     }
-    pub(crate) fn mark_as_failed(&self, error: Error) -> &Self {
+    pub(crate) fn mark_as_failed(&self, error: Arc<Error>) -> &Self {
         self.mark_as(Status::Failed(error))
     }
     pub(crate) fn set_known_size(&self, size: isize) -> &Self {
@@ -202,7 +205,15 @@ impl Progress {
         self
     }
 
-    pub(crate) fn reset(&self, as_retry: bool) -> bool {
+    pub fn is_retryable(&self) -> bool {
+        if self.is_finished() {
+            return false;
+        }
+        let retry_count = self.get_retry_count() + 1; // increment retry count by
+        self.get_metadata().is_retry_limit(retry_count)
+    }
+
+    pub(crate) fn reset(&self, as_retry: bool) -> ResultError<&Self> {
         *self.start_time.write() = None;
         *self.fail_time.write() = None;
         *self.duration.write() = None;
@@ -212,13 +223,13 @@ impl Progress {
         if as_retry {
             let retry_count = self.get_retry_count() + 1; // increment retry count by 1
             if self.get_metadata().is_retry_limit(retry_count) {
-                return false;
+                return Err(Error::invalid_state(format!("Retry limit of {} exceeded for download with id {}", retry_count, self.get_metadata().get_id())));
             }
             self.retry_count.store(retry_count, Ordering::SeqCst);
         } else {
             // reset retry count to 0 if not a retry
             self.retry_count.store(0, Ordering::SeqCst);
         }
-        true
+        Ok(self)
     }
 }

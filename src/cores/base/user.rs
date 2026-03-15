@@ -191,6 +191,7 @@ impl Util {
         let email = Domain::parse_email(email)?;
         Ok(email.to_lowercase())
     }
+
     pub fn is_strong_password<T: AsRef<str>>(password: T) -> bool {
         let password = password.as_ref();
         if password.len() < 8 {

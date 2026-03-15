@@ -1,45 +1,38 @@
-use std::{sync::Arc, time::Duration};
-use reqwest::{Method, header::HeaderMap};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use reqwest::{Method, header::{HeaderMap, HeaderValue}};
 use url::Url;
-use crate::cores::{downloader::{download_manager::DownloadManager, item::{ArcFunctionExecuteProgress, Item}, settings::{DEFAULT_FOLLOW_REDIRECT, DEFAULT_MAX_REDIRECTS, DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, MAX_MAX_RETRIES, MAX_REDIRECTS, MAX_TIMEOUT, MIN_MAX_RETRIES, MIN_TIMEOUT}}, idna::domain::Domain, net::dns::Dns, system::error::{Error, ResultError}};
+use crate::cores::{downloader::{download_manager::DownloadManager, item::{ArcFunctionClientBuilderFallback, ArcFunctionExecuteDownload, ArcFunctionExecuteProgress, Item}, settings::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_FOLLOW_REDIRECT, DEFAULT_MAX_REDIRECTS, DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, MAX_CONNECT_TIMEOUT, MAX_MAX_RETRIES, MAX_REDIRECTS, MAX_TIMEOUT, MIN_CONNECT_TIMEOUT, MIN_MAX_RETRIES, MIN_TIMEOUT}}, idna::domain::Domain, net::dns::{DnsChoice}, system::error::{Error, ResultError}};
 
 
 #[derive(Debug)]
-pub struct ItemBuilder {
+pub struct Builder {
     download_manager: Arc<DownloadManager>,
     url: Url,
-    dns: Option<Arc<Dns>>,
-    headers: Option<HeaderMap<String>>,
+    dns: Option<Arc<DnsChoice>>,
+    headers: Option<HeaderMap<HeaderValue>>,
     method: Method,
     filename: Option<String>,
     max_retries: usize,
     max_redirects: usize,
     follow_redirect: bool,
+    insecure: bool,
     timeouts: Duration,
+    connect_timeout: Duration,
+    domain_resolve: Option<HashMap<String, Vec<SocketAddr>>>,
     on_start: Option<ArcFunctionExecuteProgress>,
     on_progress: Option<ArcFunctionExecuteProgress>,
+    on_download_progress: Option<ArcFunctionExecuteDownload>,
     on_complete: Option<ArcFunctionExecuteProgress>,
     on_fail: Option<ArcFunctionExecuteProgress>,
     on_cancel: Option<ArcFunctionExecuteProgress>,
     on_finish: Option<ArcFunctionExecuteProgress>,
+    builder_fallback: Option<ArcFunctionClientBuilderFallback>,
 }
 
-impl ItemBuilder {
+impl Builder {
     fn clean_domain_name(domain: &str) -> String {
-        domain
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split('?')
-            .next()
-            .unwrap_or("")
-            .split('#')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_string()
+        let end = domain.find(|c| c == '/' || c == '?' || c == '#' || c == ':').unwrap_or(domain.len());
+        domain[..end].to_string()
     }
 
     pub fn new<U: Into<String>>(
@@ -101,26 +94,36 @@ impl ItemBuilder {
             max_redirects: DEFAULT_MAX_REDIRECTS,
             follow_redirect: DEFAULT_FOLLOW_REDIRECT,
             timeouts: DEFAULT_TIMEOUT,
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            insecure: false,
             dns: download_manager.get_default_dns(),
+            domain_resolve: None,
             on_start: None,
             on_progress: None,
+            on_download_progress: None,
             on_complete: None,
             on_fail: None,
             on_cancel: None,
             on_finish: None,
+            builder_fallback: None,
             filename: None,
         })
     }
 
-    pub fn set_dns_arc(mut self, dns: Option<Arc<Dns>>) -> Self {
-        self.dns = dns;
+    pub fn set_insecure(mut self, insecure: bool) -> Self {
+        self.insecure = insecure;
         self
     }
-    pub fn set_dns(mut self, dns: Option<Dns>) -> Self {
-        self.set_dns_arc(dns.map(Arc::new))
+    pub fn set_dns<D: Into<Arc<DnsChoice>>>(mut self, dns: Option<D>) -> Self {
+        self.dns = dns.map(|e|e.into());
+        self
     }
     pub fn set_filename<T: Into<String>>(mut self, filename: Option<T>) -> Self {
         self.filename = filename.map(|f| f.into());
+        self
+    }
+    pub fn set_builder_fallback(mut self, fallback: Option<ArcFunctionClientBuilderFallback>) -> Self {
+        self.builder_fallback = fallback;
         self
     }
     pub fn on_start(mut self, callback: ArcFunctionExecuteProgress) -> Self {
@@ -129,6 +132,10 @@ impl ItemBuilder {
     }
     pub fn on_progress(mut self, callback: ArcFunctionExecuteProgress) -> Self {
         self.on_progress = Some(callback);
+        self
+    }
+    pub fn on_download_progress(mut self, callback: ArcFunctionExecuteDownload) -> Self {
+        self.on_download_progress = Some(callback);
         self
     }
     pub fn on_complete(mut self, callback: ArcFunctionExecuteProgress) -> Self {
@@ -143,11 +150,11 @@ impl ItemBuilder {
         self.on_cancel = Some(callback);
         self
     }
-    pub fn on_finally(mut self, callback: ArcFunctionExecuteProgress) -> Self {
+    pub fn on_finish(mut self, callback: ArcFunctionExecuteProgress) -> Self {
         self.on_finish = Some(callback);
         self
     }
-    pub fn set_headers(mut self, headers: Option<HeaderMap<String>>) -> Self {
+    pub fn set_headers(mut self, headers: Option<HeaderMap<HeaderValue>>) -> Self {
         self.headers = headers;
         self
     }
@@ -167,8 +174,16 @@ impl ItemBuilder {
         self.follow_redirect = follow_redirect;
         self
     }
-    pub fn set_timeouts(mut self, timeouts: Duration) -> Self {
+    pub fn set_timeout(mut self, timeouts: Duration) -> Self {
         self.timeouts = timeouts.clamp(MIN_TIMEOUT, MAX_TIMEOUT);
+        self
+    }
+    pub fn set_connect_timeout(mut self, connect_timeout: Duration) -> Self {
+        self.connect_timeout = connect_timeout.clamp(MIN_CONNECT_TIMEOUT, MAX_CONNECT_TIMEOUT);
+        self
+    }
+    pub fn set_domain_resolve(mut self, domain_resolve: Option<HashMap<String, Vec<SocketAddr>>>) -> Self {
+        self.domain_resolve = domain_resolve;
         self
     }
     pub fn get_download_manager(&self) -> Arc<DownloadManager> {
@@ -177,11 +192,11 @@ impl ItemBuilder {
     pub fn get_url(&self) -> &Url {
         &self.url
     }
-    pub fn get_dns(&self) -> Option<Arc<Dns>> {
+    pub fn get_dns(&self) -> Option<Arc<DnsChoice>> {
         self.dns.clone()
     }
-    pub fn get_headers(&self) -> Option<HeaderMap<String>> {
-        self.headers.as_ref().map(|h| h.clone())
+    pub fn get_headers(&self) -> Option<HeaderMap<HeaderValue>> {
+        self.headers.clone()
     }
     pub fn get_method(&self) -> &Method {
         &self.method
@@ -198,14 +213,46 @@ impl ItemBuilder {
     pub fn get_follow_redirect(&self) -> bool {
         self.follow_redirect
     }
-    pub fn get_timeouts(&self) -> Duration {
+    pub fn get_timeout(&self) -> Duration {
         self.timeouts
     }
-
+    pub fn get_connect_timeout(&self) -> Duration {
+        self.connect_timeout
+    }
+    pub fn is_insecure(&self) -> bool {
+        self.insecure
+    }
+    pub fn get_domain_resolve(&self) -> Option<HashMap<String, Vec<SocketAddr>>> {
+        self.domain_resolve.clone()
+    }
+    pub fn get_on_start(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_start.clone()
+    }
+    pub fn get_on_progress(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_progress.clone()
+    }
+    pub fn get_on_download_progress(&self) -> Option<ArcFunctionExecuteDownload> {
+        self.on_download_progress.clone()
+    }
+    pub fn get_on_complete(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_complete.clone()
+    }
+    pub fn get_on_fail(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_fail.clone()
+    }
+    pub fn get_on_cancel(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_cancel.clone()
+    }
+    pub fn get_on_finish(&self) -> Option<ArcFunctionExecuteProgress> {
+        self.on_finish.clone()
+    }
+    pub fn get_builder_fallback(&self) -> Option<ArcFunctionClientBuilderFallback> {
+        self.builder_fallback.clone()
+    }
     pub fn build(&self) -> Item {
         Item::new(
-            self.get_download_manager(),
-            self.get_dns(),
+            self.get_download_manager().clone(),
+            self.get_dns().clone(),
             self.get_url().clone(),
             self.get_method().clone(),
             self.get_headers(),
@@ -213,13 +260,46 @@ impl ItemBuilder {
             self.get_max_retries(),
             self.get_max_redirects(),
             self.get_follow_redirect(),
-            self.get_timeouts(),
-            self.on_start.clone(),
-            self.on_progress.clone(),
-            self.on_complete.clone(),
-            self.on_fail.clone(),
-            self.on_cancel.clone(),
-            self.on_finish.clone(),
+            self.get_timeout(),
+            self.get_connect_timeout(),
+            self.is_insecure(),
+            self.get_domain_resolve(),
+            self.get_on_start(),
+            self.get_on_progress(),
+            self.get_on_download_progress(),
+            self.get_on_complete(),
+            self.get_on_fail(),
+            self.get_on_cancel(),
+            self.get_on_finish(),
+            self.get_builder_fallback(),
         )
+    }
+}
+
+impl From<Item> for Builder {
+    fn from(item: Item) -> Self {
+        Self {
+            download_manager: item.download_manager.clone(),
+            url: item.metadata.url.clone(),
+            dns: item.dns.clone(),
+            headers: item.metadata.headers.clone().map(|e|e.as_ref().clone()),
+            method: item.metadata.method.clone(),
+            filename: item.metadata.filename.clone(),
+            max_retries: item.metadata.max_retries,
+            max_redirects: item.metadata.max_redirects,
+            follow_redirect: item.metadata.follow_redirect,
+            timeouts: item.metadata.timeout,
+            connect_timeout: item.metadata.connect_timeout,
+            insecure: item.metadata.insecure,
+            domain_resolve: item.metadata.domain_resolve.clone().map(|e|e.as_ref().clone()),
+            on_start: item.on_start.clone(),
+            on_progress: item.on_progress.clone(),
+            on_download_progress: item.on_download_progress.clone(),
+            on_complete: item.on_complete.clone(),
+            on_fail: item.on_fail.clone(),
+            on_cancel: item.on_cancel.clone(),
+            on_finish: item.on_finish.clone(),
+            builder_fallback: item.builder_fallback.clone(),
+        }
     }
 }

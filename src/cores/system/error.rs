@@ -1042,6 +1042,18 @@ impl Error {
 
 pub type ResultError<T> = Result<T, Error>;
 
+impl From<&str> for Error {
+    fn from(s: &str) -> Self {
+        Self::new(ErrorType::Other, s)
+    }
+}
+
+impl From<String> for Error {
+    fn from(s: String) -> Self {
+        Self::new(ErrorType::Other, s)
+    }
+}
+
 /// Logs an error with contextual information including the file name and line number.
 /// # Examples
 /// ```rust

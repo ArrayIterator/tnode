@@ -1,4 +1,4 @@
-use crate::cores::{downloader::{builder::ItemBuilder, item::Item, settings::{DEFAULT_CAPACITY, MAX_CAPACITY, MIN_CAPACITY}}, net::dns::Dns, system::{
+use crate::cores::{downloader::{builder::Builder, item::Item, settings::{DEFAULT_CAPACITY, MAX_CAPACITY, MIN_CAPACITY}}, net::dns::{DnsChoice}, system::{
     error::ResultError,
     event_manager::EventManager,
 }};
@@ -27,15 +27,15 @@ impl Default for DownloadManager {
 }
 
 impl DownloadManager {
-    pub fn new(
+    pub fn new<D: Into<Arc<DnsChoice>>>(
         capacity: usize,
         max_retries: usize,
         max_follow_redirect: usize,
         follow_redirect: bool,
         timeouts: Duration,
-        dns: Option<Arc<Dns>>,
+        dns: Option<D>,
         event_manager: Arc<EventManager>,
-    ) -> Self {
+    ) -> Self where Self: Send + Sized {
         let capacity = capacity.clamp(MIN_CAPACITY, MAX_CAPACITY);
         Self {
             items: RwLock::new(DashMap::with_capacity(capacity)),
@@ -83,11 +83,11 @@ impl DownloadManager {
         self.settings.write().set_default_timeouts(timeouts);
         self
     }
-    pub fn set_default_dns(&self, dns: Option<Arc<Dns>>) -> &Self {
+    pub fn set_default_dns<D: Into<Arc<DnsChoice>>>(&self, dns: Option<D>) -> &Self {
         self.settings.write().set_default_dns(dns);
         self
     }
-    pub fn get_default_dns(&self) -> Option<Arc<Dns>> {
+    pub fn get_default_dns(&self) -> Option<Arc<DnsChoice>> {
         self.settings.read().default_dns.clone()
     }
     pub fn get_default_max_retries(&self) -> usize {
@@ -141,7 +141,7 @@ impl DownloadManager {
         self.items.write().remove(id.as_ref()).map(|(_, item)| item)
     }
 
-    pub fn builder<U: Into<String>>(self: &Arc<Self>, url: U) -> ResultError<ItemBuilder>{
-        ItemBuilder::new(self.clone(), url)
+    pub fn builder<U: Into<String>>(self: &Arc<Self>, url: U) -> ResultError<Builder>{
+        Builder::new(self.clone(), url)
     }
 }

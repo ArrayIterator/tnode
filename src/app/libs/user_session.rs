@@ -1,13 +1,13 @@
 use crate::app::models::user::User;
 use crate::cores::{auth::session::Session, database::connection::Connection};
-use parking_lot::{RwLock};
+use parking_lot::RwLock;
 use std::sync::{Arc, atomic::AtomicBool};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UserSession {
     session: Arc<Session>,
-    user: RwLock<Option<Arc<User>>>,
-    queried: AtomicBool,
+    user: Arc<RwLock<Option<Arc<User>>>>,
+    queried: Arc<AtomicBool>,
     connection: Arc<Connection>,
 }
 
@@ -15,8 +15,8 @@ impl UserSession {
     pub fn new(session: Session, connection: Arc<Connection>) -> Self {
         Self {
             session: Arc::new(session),
-            user: RwLock::new(None),
-            queried: AtomicBool::new(false),
+            user: Arc::new(RwLock::new(None)),
+            queried: Arc::new(AtomicBool::new(false)),
             connection,
         }
     }
@@ -34,11 +34,11 @@ impl UserSession {
             return self.user.read().clone();
         }
         let user_id = self.session.get_payload().as_ref().ok()?.user_id();
-        if let Ok(u) = User::find(&*self.connection, user_id).await {
-            let u_arc = Arc::new(u);
-            *self.user.write() = Some(u_arc.clone());
+        if let Ok(u) = User::find_by_id(&*self.connection, user_id).await {
             self.queried.store(true, std::sync::atomic::Ordering::Release);
-            return Some(u_arc);
+            let u = Arc::new(u);
+            *self.user.write() = Some(u.clone());
+            Some(u);
         }
         self.queried
             .store(true, std::sync::atomic::Ordering::Release);
