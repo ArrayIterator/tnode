@@ -20,9 +20,6 @@ impl Default for SessionMiddleware {
 }
 
 impl Middleware for SessionMiddleware {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
     fn get_priority(&self) -> isize {
         999
     }

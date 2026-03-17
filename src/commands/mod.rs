@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 #![deny(unused_imports)]
 
-use crate::app::commands::init::Init;
-use crate::app::commands::monitor::Monitor;
-use crate::app::commands::server::Server;
+use crate::commands::init::Init;
+use crate::commands::monitor::Monitor;
+use crate::commands::server::Server;
 use crate::cores::runner::cli::Cli;
 use crate::cores::system::error::ResultError;
 use crate::factory::app::App;

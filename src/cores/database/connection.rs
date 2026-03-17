@@ -1,19 +1,22 @@
+use crate::cores::database::adapter::Adapter;
 use crate::cores::database::configuration::Configuration;
 use crate::cores::database::entity::Entity;
 use crate::cores::database::query_builder::QueryBuilder;
 use crate::cores::system::event_manager::EventManager;
-use sqlx::{Database, Pool, Postgres};
+use sqlx::{Database, Pool, Any};
 use std::fmt::Debug;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+pub type DbType = Any;
+pub type ConnectionPool = Pool<DbType>;
 
 #[derive(Debug)]
 pub struct Connection {
     config: Arc<Configuration>,
-    event_manager: Option<Arc<EventManager>>
+    pool: Arc<OnceLock<Pool<DbType>>>,
+    event_manager: Option<Arc<EventManager>>,
 }
-
-pub type ConnectionPool = Pool<Postgres>;
 
 /// # Examples
 ///
@@ -91,11 +94,15 @@ impl Connection {
     /// }
     /// ```
     pub fn new(config: Arc<Configuration>, event_manager: Option<Arc<EventManager>>) -> Self {
-        Self { config, event_manager }
+        Self {
+            config,
+            pool: Default::default(),
+            event_manager,
+        }
     }
 
     pub fn with_event_manager(config: Arc<Configuration>, event: Arc<EventManager>) -> Self {
-        Self { config, event_manager: Some(event.clone()) }
+        Self::new(config, Some(event))
     }
 
     pub fn set_event_manager(&mut self, event_manager: Option<Arc<EventManager>>) {
@@ -140,8 +147,8 @@ impl Connection {
     ///
     /// - Ensure proper error handling when retrieving connections from the pool.
     /// - Avoid exhausting the pool by releasing connections back after use, typically via RAII or explicit release mechanisms.
-    pub fn pool(&self) -> &ConnectionPool {
-        &self.config.pool()
+    pub fn pool(&self) -> &Pool<DbType> {
+        &self.pool.get_or_init(|| DbType::pool(&self.config))
     }
     /// Creates a new `QueryBuilder` instance for constructing database queries.
     ///
@@ -162,27 +169,27 @@ impl Connection {
     /// ```
     pub fn create_query_builder<E: Entity>(&self) -> QueryBuilder<'_, E>
     where
-        for<'q> <Postgres as Database>::Arguments<'q>: sqlx::IntoArguments<'q, Postgres>,
-        for<'c> &'c ConnectionPool: sqlx::Executor<'c, Database = Postgres>,
+        for<'q> <DbType as Database>::Arguments<'q>: sqlx::IntoArguments<'q, DbType>,
+        for<'c> &'c Pool<DbType>: sqlx::Executor<'c, Database = DbType>,
     {
         QueryBuilder::new(self.pool())
     }
 }
 
 impl Deref for Connection {
-    type Target = ConnectionPool;
+    type Target = Pool<DbType>;
     fn deref(&self) -> &Self::Target {
         self.pool()
     }
 }
 
-impl From<Connection> for ConnectionPool {
+impl From<Connection> for Pool<DbType> {
     fn from(conn: Connection) -> Self {
         conn.pool().clone()
     }
 }
 
-impl From<&Connection> for ConnectionPool {
+impl From<&Connection> for Pool<DbType> {
     fn from(conn: &Connection) -> Self {
         conn.pool().clone()
     }

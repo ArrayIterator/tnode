@@ -6,7 +6,7 @@ use crate::cores::proc::status::Status;
 use crate::cores::system::error::{Error, ResultError};
 use crate::cores::system::event_manager::{EventManager, OperationError};
 use crate::cores::system::middleware_manager::MiddlewareManager;
-use crate::cores::system::routes::Routes;
+use crate::cores::system::routes::{Routes};
 use crate::cores::system::stats::Stats;
 use crate::factory::config::Config;
 use crate::factory::factory::Factory;
@@ -324,13 +324,11 @@ impl Server {
                     }
                 })
                 // Configure routes
-                .configure(|service| {
-                    shared_routes.conduct(service);
-                });
+                .configure(|e|shared_routes.dispatch(e));
             app
         });
 
-        // 5️⃣ Bind UDS
+        // Bind UDS
         let uds = UnixListener::bind(socket).map_err(|e| {
             self.running.store(false, Ordering::SeqCst);
             self.processing.store(false, Ordering::SeqCst);
@@ -391,7 +389,7 @@ impl Server {
             ))
         })?;
 
-        // 6️⃣ Bind TCP
+        // Bind TCP
         for b in &binding {
             server = server.bind(b).map_err(|e| {
                 self.running.store(false, Ordering::SeqCst);

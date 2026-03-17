@@ -19,9 +19,6 @@ impl Default for AssetManagerMiddleware {
 }
 
 impl Middleware for AssetManagerMiddleware {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
     fn get_priority(&self) -> isize {
         998
     }

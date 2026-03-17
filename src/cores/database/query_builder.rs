@@ -1,15 +1,15 @@
 #![allow(clippy::wrong_self_convention)]
 
-use crate::cores::database::connection::ConnectionPool;
+use crate::cores::database::connection::DbType;
 use crate::cores::database::entity::Entity;
 use crate::cores::database::expr::and_x::AndX;
 use crate::cores::database::expr::expr::{Expr, Expression};
 use crate::cores::database::expr::join::{Join, JoinType};
 use crate::cores::database::expr::or_x::OrX;
 use crate::cores::helper::hack::Hack;
-use sqlx::{Database, Encode, Error, Postgres, Type};
+use sqlx::{Database, Encode, Error, Pool, Type};
 use std::any::type_name;
-use std::fmt::{Debug};
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,7 +156,9 @@ impl QueryKind {
             QueryKind::Delete { .. } => sql.push_str("DELETE FROM"),
         }
         sql.push(' ');
-        let table = self.get_table().ok_or(Error::Protocol("Table name is empty".to_string()))?;
+        let table = self
+            .get_table()
+            .ok_or(Error::Protocol("Table name is empty".to_string()))?;
         let table_schema = self.get_table_schema();
         if let Some(schema) = table_schema {
             sql.push_str(&format!(
@@ -197,7 +199,7 @@ impl QueryKind {
 
 #[derive(Debug, Clone)]
 pub struct QueryBuilder<'a, E: Entity> {
-    pool: &'a ConnectionPool,
+    pool: &'a Pool<DbType>,
     _marker: PhantomData<E>,
     kind: QueryKind,
     joins: Vec<Join>,
@@ -213,10 +215,10 @@ pub struct QueryBuilder<'a, E: Entity> {
 
 impl<'a, E: Entity> QueryBuilder<'a, E>
 where
-    for<'q> <Postgres as Database>::Arguments<'q>: sqlx::IntoArguments<'q, Postgres>,
-    for<'c> &'c ConnectionPool: sqlx::Executor<'c, Database = Postgres>,
+    for<'q> <DbType as Database>::Arguments<'q>: sqlx::IntoArguments<'q, DbType>,
+    for<'c> &'c Pool<DbType>: sqlx::Executor<'c, Database = DbType>,
 {
-    pub fn new(pool: &'a ConnectionPool) -> Self {
+    pub fn new(pool: &'a Pool<DbType>) -> Self {
         Self {
             pool,
             where_clause: None,
@@ -235,7 +237,7 @@ where
         }
     }
 
-    fn get_pool(&self) -> &'a ConnectionPool {
+    fn get_pool(&self) -> &'a Pool<DbType> {
         self.pool
     }
 
@@ -448,8 +450,9 @@ where
     }
 
     pub fn update_entity<Ent: Entity>(&mut self, schema: Option<String>) -> &mut Self {
+        let table = Ent::default().table();
         self.kind = QueryKind::Update {
-            table: Some(Ent::table()),
+            table: Some(table),
             sets: Vec::new(),
             alias: None,
             table_schema: schema,
@@ -490,8 +493,9 @@ where
     }
 
     pub fn delete_entity<Ent: Entity>(&mut self, schema: Option<String>) -> &mut Self {
+        let table = Ent::default().table();
         self.kind = QueryKind::Delete {
-            table: Some(E::table()),
+            table: Some(table),
             alias: None,
             table_schema: schema,
         };
@@ -539,13 +543,14 @@ where
         new
     }
     pub async fn find_as<Ent: Entity>(
-        pool: &'a ConnectionPool,
+        pool: &'a Pool<DbType>,
         id: Ent::KeyType,
     ) -> Result<Ent, Error>
     where
-        Ent::KeyType: for<'q> Encode<'q, Postgres> + Type<Postgres>,
+        Ent::KeyType: for<'q> Encode<'q, DbType> + Type<DbType>,
     {
-        let primary_key = Ent::primary_key();
+        let t = Ent::default();
+        let primary_key = t.primary_key();
         if primary_key.is_empty() {
             return Err(Error::InvalidArgument(format!(
                 "Entity {} does not support primary key",
@@ -555,30 +560,27 @@ where
         let expr = Expr::eq(primary_key, id.to_string());
         Ok(QueryBuilder::<'a, Ent>::new(pool)
             .select(vec!['*'])
+            .from_table(t.table())
             .where_(expr)
             .fetch_one_as()
             .await?)
     }
 
     pub async fn find_where_as<Ent, V, C>(
-        pool: &'a ConnectionPool,
+        pool: &'a Pool<DbType>,
         column: C,
         value: V,
     ) -> Result<E, Error>
     where
         Ent: Entity,
         C: Into<String>,
-        V: for<'q> Encode<'q, Postgres>
-            + Type<Postgres>
-            + Send
-            + Sync
-            + Into<String>
-            + Debug
-            + 'static,
+        V: for<'q> Encode<'q, DbType> + Type<DbType> + Send + Sync + Into<String> + Debug + 'static,
     {
+        let t = Ent::default();
         let expr = Expr::eq(column, value);
         Ok(QueryBuilder::<'a, E>::new(pool)
             .select(vec!['*'])
+            .from_table(t.table())
             .where_(expr)
             .fetch_one_as()
             .await?)
@@ -593,7 +595,7 @@ where
         Ent: Entity,
     {
         let sql = self.to_sql()?;
-        sqlx::query_as::<Postgres, Ent>(&sql)
+        sqlx::query_as::<DbType, Ent>(&sql)
             .fetch_all(self.pool)
             .await
     }
@@ -603,12 +605,12 @@ where
         Ent: Entity,
     {
         let sql = self.to_sql()?;
-        sqlx::query_as::<Postgres, Ent>(&sql)
+        sqlx::query_as::<DbType, Ent>(&sql)
             .fetch_one(self.get_pool())
             .await
     }
 
-    pub async fn execute(&self) -> Result<<Postgres as Database>::QueryResult, Error> {
+    pub async fn execute(&self) -> Result<<DbType as Database>::QueryResult, Error> {
         let sql = self.to_sql()?;
         sqlx::query(&sql).execute(self.pool).await
     }

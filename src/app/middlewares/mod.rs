@@ -1,5 +1,5 @@
-use crate::app::middleware::asset_manager_middleware::AssetManagerMiddleware;
-use crate::app::middleware::session_middleware::SessionMiddleware;
+use crate::app::middlewares::asset_manager_middleware::AssetManagerMiddleware;
+use crate::app::middlewares::session_middleware::SessionMiddleware;
 use crate::cores::system::error::ResultError;
 use crate::cores::system::middleware_manager::MiddlewareManager;
 use crate::factory::app::App;
@@ -10,7 +10,7 @@ mod session_middleware;
 
 pub(crate) fn bind_middleware(app: &App) -> ResultError<&App> {
     Factory::pick_mut::<MiddlewareManager>()?
-        .register::<AssetManagerMiddleware>()
-        .register::<SessionMiddleware>();
+        .register_by_type::<AssetManagerMiddleware>()
+        .register_by_type::<SessionMiddleware>();
     Ok(app)
 }

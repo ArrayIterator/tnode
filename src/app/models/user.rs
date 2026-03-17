@@ -4,14 +4,14 @@ use crate::cores::auth::totp::TotpCharLength;
 use crate::cores::base::snapshot::Snapshot;
 use crate::cores::base::to_json::ToJson;
 use crate::cores::base::user::{UserBase, Util};
-use crate::cores::database::connection::ConnectionPool;
+use crate::cores::database::connection::DbType;
 use crate::cores::database::entity::{Entity, RecordState, record_dirty_state};
 use crate::cores::generator::random::Random;
 use crate::cores::system::error::{Error, ResultError};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{FromRow, Postgres, Row};
+use sqlx::{FromRow, Pool, Row};
 use std::fmt::{Debug, Display};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Instant;
@@ -70,9 +70,15 @@ impl<T: AsRef<str>> From<T> for UserStatus {
 
 #[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
 pub struct User {
+    #[serde(skip)]
+    pub table_name: String,
+    #[serde(skip)]
+    pub table_schema: String,
     #[serde(default)]
     pub(crate) id: i64,
+    #[serde(default)]
     pub(crate) username: String,
+    #[serde(default)]
     pub(crate) email: String,
     #[serde(default)]
     pub(crate) status: String,
@@ -115,6 +121,8 @@ impl Default for User {
     fn default() -> Self {
         let timestamp = chrono::Utc::now().timestamp();
         Self {
+            table_name: "users".to_string(),
+            table_schema: "public".to_string(),
             id: 0,
             username: Default::default(),
             email: Default::default(),
@@ -137,6 +145,7 @@ impl Default for User {
         }
     }
 }
+
 impl User {
     pub fn new<Username: AsRef<str>, Email: AsRef<str>, Pass: AsRef<str>>(
         username: Username,
@@ -152,7 +161,6 @@ impl User {
         default_self.username = username;
         Ok(default_self)
     }
-
     pub fn generate_secret_key() -> String {
         Random::hex(64)
     }
@@ -375,14 +383,14 @@ impl User {
         None
     }
 
-    pub async fn delete<C: Into<ConnectionPool>>(&mut self, conn: C) -> Result<(), sqlx::Error> {
+    pub async fn delete<C: Into<Pool<DbType>>>(&mut self, conn: C) -> Result<(), sqlx::Error> {
         if self.is_deleted() {
             return Ok(());
         }
         let now = chrono::Utc::now().timestamp();
         let str = format!(
             "UPDATE {} SET deleted_at=$1, updated_at=$2 WHERE id=$3",
-            Self::table_quoted()
+            Self::default().table_quoted()
         );
         sqlx::query(&str)
             .bind(now)
@@ -395,7 +403,7 @@ impl User {
         Ok(())
     }
 
-    pub async fn find_fresh_by_username<C: Into<ConnectionPool>, T: AsRef<str>>(
+    pub async fn find_fresh_by_username<C: Into<Pool<DbType>>, T: AsRef<str>>(
         conn: C,
         username: T,
     ) -> Result<Self, sqlx::Error> {
@@ -405,9 +413,9 @@ impl User {
                 "Username can not be empty or contain whitespace only".to_string(),
             ));
         }
-        let user = sqlx::query_as::<Postgres, Self>(&format!(
+        let user = sqlx::query_as::<DbType, Self>(&format!(
             "SELECT * FROM {} WHERE LOWER(username)=$1",
-            Self::table_quoted()
+            Self::default().table_quoted()
         ))
         .bind(&username)
         .fetch_one(&conn.into())
@@ -416,7 +424,7 @@ impl User {
         Ok(user)
     }
 
-    pub async fn find_by_username<C: Into<ConnectionPool>, T: AsRef<str>>(
+    pub async fn find_by_username<C: Into<Pool<DbType>>, T: AsRef<str>>(
         conn: C,
         username: T,
     ) -> Result<Self, sqlx::Error> {
@@ -427,7 +435,7 @@ impl User {
         Self::find_fresh_by_username(conn, username).await
     }
 
-    pub async fn find_by_fresh_email<C: Into<ConnectionPool>, T: AsRef<str>>(
+    pub async fn find_by_fresh_email<C: Into<Pool<DbType>>, T: AsRef<str>>(
         conn: C,
         email: T,
     ) -> Result<Self, sqlx::Error> {
@@ -441,9 +449,9 @@ impl User {
             Ok(e) => e,
             Err(_) => email.clone(),
         };
-        let user = sqlx::query_as::<Postgres, Self>(&format!(
+        let user = sqlx::query_as::<DbType, Self>(&format!(
             "SELECT * FROM {} WHERE email=$1 OR LOWER(email)=$1",
-            Self::table_quoted()
+            Self::default().table_quoted()
         ))
         .bind(&email)
         .bind(&second_mail)
@@ -453,7 +461,7 @@ impl User {
         Ok(user)
     }
 
-    pub async fn find_by_email<C: Into<ConnectionPool>, T: AsRef<str>>(
+    pub async fn find_by_email<C: Into<Pool<DbType>>, T: AsRef<str>>(
         conn: C,
         email: T,
     ) -> Result<Self, sqlx::Error> {
@@ -464,7 +472,7 @@ impl User {
         Self::find_by_fresh_email(conn, email).await
     }
 
-    pub async fn find_fresh_by_id<C: Into<ConnectionPool>>(
+    pub async fn find_fresh_by_id<C: Into<Pool<DbType>>>(
         conn: C,
         id: u64,
     ) -> Result<Self, sqlx::Error> {
@@ -474,9 +482,9 @@ impl User {
                 id
             )));
         }
-        let user = sqlx::query_as::<Postgres, Self>(&format!(
+        let user = sqlx::query_as::<DbType, Self>(&format!(
             "SELECT * FROM {} WHERE id=$1",
-            Self::table_quoted()
+            Self::default().table_quoted()
         ))
         .bind(id as i64)
         .fetch_one(&conn.into())
@@ -485,10 +493,7 @@ impl User {
         Ok(user)
     }
 
-    pub async fn find_by_id<C: Into<ConnectionPool>>(
-        conn: C,
-        id: u64,
-    ) -> Result<Self, sqlx::Error> {
+    pub async fn find_by_id<C: Into<Pool<DbType>>>(conn: C, id: u64) -> Result<Self, sqlx::Error> {
         if id <= 0 {
             return Err(sqlx::Error::InvalidArgument(format!(
                 "Id should be greater than zero and should not being {}",
@@ -501,7 +506,7 @@ impl User {
         Self::find_fresh_by_id(conn, id).await
     }
 
-    pub async fn save<I: Into<ConnectionPool>>(
+    pub async fn save<I: Into<Pool<DbType>>>(
         &mut self,
         conn: I,
     ) -> Result<Option<Self>, sqlx::Error> {
@@ -539,7 +544,7 @@ impl User {
             let v = vec.join(",");
             let str = format!(
                 "UPDATE {} SET {}, updated_at=${} WHERE id=${} RETURNING id",
-                Self::table_quoted(),
+                Self::default().table_quoted(),
                 v,
                 updated_at_idx,
                 id_idx
@@ -584,7 +589,7 @@ impl User {
                 VALUES           ($1,       $2,       $3,    $4,     $5,   $6,         $7,        $8,       $9,         $10,         $11,        $12,    $13,        $14,       $15)
                 RETURNING id
                 "#,
-                Self::table_quoted()
+                Self::default().table_quoted()
             );
             let res = sqlx::query(&str)
                 .bind(self.username())
@@ -619,19 +624,20 @@ impl User {
 
 impl Entity for User {
     type KeyType = i64;
-    const TABLE_NAME: &'static str = "users";
-    const PRIMARY_KEY: &'static str = "id";
     fn record_state(&self) -> RecordState {
         self.__state.clone()
     }
-    fn table_name() -> &'static str {
-        Self::TABLE_NAME
+
+    fn table_name(&self) -> &str {
+        &self.table_name
     }
-    fn table_schema() -> &'static str {
-        Self::TABLE_SCHEMA
+
+    fn table_schema(&self) -> &str {
+        &self.table_schema
     }
-    fn primary_key() -> &'static str {
-        Self::PRIMARY_KEY
+
+    fn primary_key(&self) -> &str {
+        "id"
     }
 }
 

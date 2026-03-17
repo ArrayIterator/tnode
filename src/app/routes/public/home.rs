@@ -1,13 +1,13 @@
-// use std::sync::Arc;
-use crate::cores::system::routes::Route;
-use actix_web::web::{ServiceConfig};
+use crate::cores::system::routes::RouteMounter;
+use actix_web::web::{ServiceConfig, resource};
 use actix_web::{HttpResponse, web};
 
 #[derive(Debug, Default)]
 pub(crate) struct Home;
 
-impl Route for Home {
-    fn mount(&self, cfg: &mut ServiceConfig, _prefix: &str) {
+impl RouteMounter for Home {
+    fn mount(&self, cfg: &mut ServiceConfig,) {
+        cfg.service(resource(""));
         cfg.route(
             "/",
             web::get().to(move || {

@@ -1,13 +1,13 @@
-use crate::cores::system::routes::Route;
 use actix_web::web::ServiceConfig;
 use actix_web::{Error, HttpRequest, HttpResponse, web};
 use futures_util::StreamExt;
+use crate::cores::system::routes::RouteMounter;
 
 #[derive(Debug, Default)]
 pub(crate) struct Ws;
 
-impl Route for Ws {
-    fn mount(&self, cfg: &mut ServiceConfig, _prefix: &str) {
+impl RouteMounter for Ws {
+    fn mount(&self, cfg: &mut ServiceConfig) {
         cfg.route("/ws", web::get().to(ws_handler));
     }
 }

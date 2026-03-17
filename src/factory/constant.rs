@@ -520,6 +520,9 @@ redis:
 # Database connection pool settings
 # Use PostgreSQL
 database:
+  # Database driver
+  # postgresql, sqlite, mysql
+  driver: "postgresql"
   # Unix socket path
   # Default: (empty)
   socket: null
@@ -546,6 +549,9 @@ database:
   # Connection acquisition timeout in seconds
   # Default: 1800
   max_lifetime: 1800
+  # Statement timeout in seconds
+  # Default: 5
+  statement_timeout: 5
   # Idle connection timeout in seconds
   # Default: 600
   idle_timeout: 600
@@ -566,6 +572,9 @@ database:
   # Log threshold in seconds
   # Default: 1
   log_threshold: 1
+  # Collation (only for MySQL)
+  # Default: utf8mb4_general_ci
+  collation: "utf8mb4_general_ci"
 # ----------------------------------------
 # Licenses / API Key based on requirements
 #

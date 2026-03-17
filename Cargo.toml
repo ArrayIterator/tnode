@@ -26,6 +26,7 @@ members = []
 [dependencies]
 # Web & Async
 actix-web = { version = "4", features = ["rustls-0_23", "secure-cookies"] }
+actix-router = "0.5"
 actix-ws = "0.4"
 actix-service = "2.0"
 actix-multipart = "0.7"
@@ -34,9 +35,10 @@ async-trait = "0.1"
 parking_lot = "0.12"
 
 # Database & Data
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "tls-rustls-ring-webpki", "migrate", "json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "mysql", "sqlite", "uuid", "chrono", "tls-rustls-ring-webpki", "migrate", "json"] }
+sqlx-core = "0.8"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 serde_yaml = "0.9"
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
 r2d2 = "0.8"

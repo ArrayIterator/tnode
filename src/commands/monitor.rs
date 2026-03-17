@@ -1,4 +1,4 @@
-use crate::app::commands::server::Server;
+use crate::commands::server::Server;
 use crate::cores::generator::uuid::Uuid;
 use crate::cores::helper::user::User;
 use crate::cores::runner::console::{ConsoleArguments, ConsoleCommand, ConsoleResult};

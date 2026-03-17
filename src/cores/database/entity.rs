@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{Database, FromRow, Postgres};
+use sqlx::{Database, FromRow};
 use std::fmt::Debug;
 
-use crate::cores::{helper::hack::Hack};
+use crate::cores::{database::connection::DbType, helper::hack::Hack};
 
 /// A trait representing a database entity that maps to a table row.
 ///
@@ -49,12 +49,9 @@ use crate::cores::{helper::hack::Hack};
 /// }
 /// ```
 pub trait Entity:
-    for<'r> FromRow<'r, <Postgres as Database>::Row> + Unpin + Send + Sync + Debug + 'static + Clone
+    for<'r> FromRow<'r, <DbType as Database>::Row> + Unpin + Send + Sync + Debug + 'static + Clone + Default
 {
     type KeyType: Send + Sync + Debug + ToString + 'static;
-    const TABLE_NAME: &'static str;
-    const TABLE_SCHEMA: &'static str = "public";
-    const PRIMARY_KEY: &'static str;
     fn record_state(&self) -> RecordState;
     fn is_clean_state(&self) -> bool {
         self.record_state() == RecordState::Clean
@@ -68,23 +65,22 @@ pub trait Entity:
     fn is_clean_dirty_state(&self) -> bool {
         self.record_state() == RecordState::CleanDirty
     }
-    fn table() -> String {
+    fn table(&self) -> String {
         let mut str = String::new();
-        let table_schema = Self::table_schema();
+        let table_schema = self.table_schema();
         if !table_schema.trim().is_empty() {
             str.push_str(&Hack::escape_table_identifier(table_schema, false));
             str.push('.');
         }
-        str.push_str(&Hack::escape_table_identifier(Self::table_name(), false));
+        str.push_str(&Hack::escape_table_identifier(self.table_name(), false));
         str
     }
-
-    fn table_quoted() -> String {
-        format!(r#""{}""#, Self::table())
+    fn table_quoted(&self) -> String {
+        format!(r#""{}""#, self.table())
     }
-    fn table_name() -> &'static str;
-    fn table_schema() -> &'static str;
-    fn primary_key() -> &'static str;
+    fn table_name(&self) -> &str;
+    fn table_schema(&self) -> &str;
+    fn primary_key(&self) -> &str;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

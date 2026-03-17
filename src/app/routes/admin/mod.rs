@@ -6,7 +6,7 @@ where
     Self: Orchestrator;
 
 impl Orchestrator for Admin {
-    fn ensemble(routes: &mut Routes) -> &mut Routes {
+    fn orchestra(routes: &mut Routes) -> &mut Routes {
         routes
     }
 }

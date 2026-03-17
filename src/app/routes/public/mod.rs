@@ -11,10 +11,10 @@ where
     Self: Orchestrator;
 
 impl Orchestrator for Public {
-    fn ensemble(routes: &mut Routes) -> &mut Routes {
+    fn orchestra(routes: &mut Routes) -> &mut Routes {
         routes
-            .orchestra::<Home>()
+            .mount::<Home>()
             // routes.orchestra::<Home>()
-            .orchestra::<Ws>()
+            .mount::<Ws>()
     }
 }

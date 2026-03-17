@@ -1,7 +1,6 @@
 use actix_web::Error;
 use actix_web::body::{BoxBody, MessageBody};
 use actix_web::dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready};
-use std::any::{Any, TypeId};
 use std::fmt::Debug;
 use std::future::{Ready, ready};
 use std::pin::Pin;
@@ -14,17 +13,10 @@ pub type MiddlewareResult = BoxFuture<Result<ServiceResponse<BoxBody>, Error>>;
 pub type NextFn = Box<dyn FnOnce(ServiceRequest) -> MiddlewareResult>;
 
 pub trait Middleware: Send + Sync + Debug + 'static {
-    fn as_any(&self) -> &dyn Any;
     fn get_priority(&self) -> isize {
         0
     }
     fn handle(&self, req: ServiceRequest, next: NextFn) -> MiddlewareResult;
-}
-
-impl PartialEq for dyn Middleware {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_any().type_id() == other.as_any().type_id()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +118,32 @@ where
     }
 }
 
+#[derive(Clone)]
+struct MiddlewareFunctionWrapper {
+    func: Arc<dyn Fn(ServiceRequest, NextFn) -> MiddlewareResult + Send + Sync + 'static>,
+}
+
+impl Middleware for MiddlewareFunctionWrapper {
+    fn handle(&self, req: ServiceRequest, next: NextFn) -> MiddlewareResult {
+        (self.func)(req, next)
+    }
+}
+
+impl Debug for MiddlewareFunctionWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MiddlewareFunctionWrapper")
+    }
+}
+
+fn wrap_middleware_function<F>(func: F) -> Arc<MiddlewareFunctionWrapper>
+where
+    F: Fn(ServiceRequest, NextFn) -> MiddlewareResult + Send + Sync + 'static,
+{
+    Arc::new(MiddlewareFunctionWrapper {
+        func: Arc::new(func),
+    })
+}
+
 /// Manages a collection of middleware in a pipeline.
 ///
 /// Middleware can be appended, prepended, or filtered from the pipeline.
@@ -142,24 +160,20 @@ impl MiddlewareManager {
         }
     }
 
-    pub fn has<M: Middleware>(&self) -> bool {
-        let type_id = TypeId::of::<M>();
-        self.middlewares
-            .iter()
-            .any(|e| e.as_any().type_id() == type_id)
-    }
-
-    pub fn register<M: Middleware + Default>(&mut self) -> &mut Self {
-        if self.has::<M>() {
-            return self;
-        }
-        self.middlewares.push(Arc::new(M::default()));
+    pub fn register<M: Middleware>(&mut self, middleware: M) -> &mut Self {
+        self.middlewares.push(Arc::new(middleware));
         self
     }
 
-    pub fn remove<M: Middleware>(&mut self) {
-        let type_id = TypeId::of::<M>();
-        self.middlewares.retain(|e| e.as_any().type_id() != type_id);
+    pub fn register_by_type<M: Middleware + Default>(&mut self) -> &mut Self {
+        self.register(M::default())
+    }
+
+    pub fn register_function<F>(&mut self, func: F) -> &mut Self
+        where
+            F: Fn(ServiceRequest, NextFn) -> MiddlewareResult + Send + Sync + 'static  {
+        self.middlewares.push(wrap_middleware_function(func));
+        self
     }
 
     pub fn len(&self) -> usize {
