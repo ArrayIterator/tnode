@@ -3,7 +3,7 @@ use std::sync::{Arc};
 
 use crate::cores::downloader::download_manager::DownloadManager;
 use crate::cores::system::error::{Error, ResultError};
-// todo: completing
+// @todo: Implementing maxmind database
 
 // https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz
 // https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz

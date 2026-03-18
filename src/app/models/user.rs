@@ -189,6 +189,11 @@ impl User {
         self.username = username;
         Ok(())
     }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
     pub fn set_password<T: AsRef<str>>(&mut self, password: T) -> ResultError<()> {
         self.set_password_hashed(Password::hash(password)?)
     }
@@ -642,10 +647,6 @@ impl Snapshot for User {
 impl UserBase for User {
     fn id(&self) -> i64 {
         self.id
-    }
-
-    fn username(&self) -> &str {
-        &self.username
     }
 
     fn email(&self) -> &str {

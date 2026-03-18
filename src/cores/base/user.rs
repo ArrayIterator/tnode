@@ -82,22 +82,6 @@ pub trait UserBase {
     /// ```
     fn id(&self) -> i64;
 
-    /// Retrieves the username associated with the current instance.
-    ///
-    /// This method returns a `String` representing the username. It is expected
-    /// to be implemented by types that include user-related information.
-    ///
-    /// # Returns
-    /// * `String` - The username as a string.
-    ///
-    /// # Examples
-    /// ```
-    /// let user = User::new("Alice");
-    /// let username = user.username();
-    /// assert_eq!(username, "Alice".to_string());
-    /// ```
-    fn username(&self) -> &str;
-
     /// Retrieves the email associated with the current instance.
     ///
     /// This method returns a `String` representing the email. It is expected
