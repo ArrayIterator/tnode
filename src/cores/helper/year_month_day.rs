@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::Datelike;
 
 pub enum Day {
@@ -280,3 +282,27 @@ impl<T: Datelike + 'static> From<T> for YearMonthDay {
         }
     }
 }
+
+pub const MINUTE_IN_SECONDS: u64 = 60;
+pub const MINUTE_IN_HOURS: u64 = 60;
+pub const DAY_IN_HOURS: u64 = 24;
+pub const WEEK_IN_DAYS: u64 = 7;
+pub const MONTH_IN_DAYS: u64 = 30;
+pub const YEAR_IN_DAYS: u64 = 365;
+
+pub const WEEK_IN_HOURS: u64 = DAY_IN_HOURS * WEEK_IN_DAYS;
+pub const MONTH_IN_HOURS: u64 = DAY_IN_HOURS * MONTH_IN_DAYS;
+pub const YEAR_IN_HOURS: u64 = DAY_IN_HOURS * YEAR_IN_DAYS;
+
+pub const HOUR_IN_SECONDS: u64 = MINUTE_IN_HOURS * MINUTE_IN_SECONDS;
+pub const DAY_IN_SECONDS: u64 = DAY_IN_HOURS * HOUR_IN_SECONDS;
+pub const WEEK_IN_SECONDS: u64 = WEEK_IN_HOURS * HOUR_IN_SECONDS;
+pub const MONTH_IN_SECONDS: u64 = MONTH_IN_HOURS * HOUR_IN_SECONDS;
+pub const YEAR_IN_SECONDS: u64 = YEAR_IN_HOURS * HOUR_IN_SECONDS;
+
+// Gunakan from_secs agar bisa masuk ke const
+pub const DURATION_HOUR: Duration = Duration::from_secs(HOUR_IN_SECONDS);
+pub const DURATION_DAY: Duration = Duration::from_secs(DAY_IN_SECONDS);
+pub const DURATION_WEEK: Duration = Duration::from_secs(WEEK_IN_SECONDS);
+pub const DURATION_MONTH: Duration = Duration::from_secs(MONTH_IN_SECONDS);
+pub const DURATION_YEAR: Duration = Duration::from_secs(YEAR_IN_SECONDS);

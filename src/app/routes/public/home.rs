@@ -17,7 +17,7 @@ impl RouteMounter for Home {
                         .content_type("text/html")
                         .body("OK")
                 }
-            }),
+            })
         );
     }
 }

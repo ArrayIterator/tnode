@@ -1,5 +1,4 @@
 use crate::cores::auth::password::Password;
-use crate::cores::auth::session_tokenizer::{SessionPayload, SessionTokenizer};
 use crate::cores::auth::totp::TotpCharLength;
 use crate::cores::base::snapshot::Snapshot;
 use crate::cores::base::to_json::ToJson;
@@ -166,13 +165,6 @@ impl User {
     }
     pub fn generate_totp_key() -> String {
         TotpCharLength::Default.generate()
-    }
-
-    pub fn create_token_payload(
-        &self,
-        tokenizer: &SessionTokenizer,
-    ) -> ResultError<SessionPayload> {
-        tokenizer.generate_with(self)
     }
 
     fn stack_state<T: Send + Sync + 'static + PartialEq>(&mut self, current: T, new: T) {

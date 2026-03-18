@@ -1,12 +1,13 @@
 use crate::app::models::user::User;
 use crate::cores::{auth::session::Session, database::connection::Connection};
-use parking_lot::RwLock;
+use log::trace;
+use tokio::sync::OnceCell;
 use std::sync::{Arc, atomic::AtomicBool};
 
 #[derive(Debug, Clone)]
 pub struct UserSession {
     session: Arc<Session>,
-    user: Arc<RwLock<Option<Arc<User>>>>,
+    user: Arc<OnceCell<Option<Arc<User>>>>,
     queried: Arc<AtomicBool>,
     connection: Arc<Connection>,
 }
@@ -15,7 +16,7 @@ impl UserSession {
     pub fn new(session: Session, connection: Arc<Connection>) -> Self {
         Self {
             session: Arc::new(session),
-            user: Arc::new(RwLock::new(None)),
+            user: Arc::new(OnceCell::new()),
             queried: Arc::new(AtomicBool::new(false)),
             connection,
         }
@@ -30,18 +31,14 @@ impl UserSession {
         self.get_session_ref().clone()
     }
     pub async fn get_user(&self) -> Option<Arc<User>> {
-        if self.queried.load(std::sync::atomic::Ordering::Acquire) {
-            return self.user.read().clone();
-        }
-        let user_id = self.session.get_payload().as_ref().ok()?.user_id();
-        if let Ok(u) = User::find_by_id(&*self.connection, user_id).await {
-            self.queried.store(true, std::sync::atomic::Ordering::Release);
-            let u = Arc::new(u);
-            *self.user.write() = Some(u.clone());
-            Some(u);
-        }
-        self.queried
-            .store(true, std::sync::atomic::Ordering::Release);
-        None
+        self.user.get_or_init(|| async {
+            let payload = self.session.get_payload();
+            let user_id = payload.user_id();
+            trace!("Querying database for user: {}", user_id);
+            match User::find_by_id(&*self.connection, user_id).await {
+                Ok(u) => Some(Arc::new(u)),
+                Err(_) => None,
+            }
+        }).await.clone()
     }
 }

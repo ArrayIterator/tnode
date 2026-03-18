@@ -24,15 +24,22 @@ impl Middleware for SessionMiddleware {
         999
     }
     fn handle(&self, req: ServiceRequest, next: NextFn) -> MiddlewareResult {
-        if let Some(config) = self.server.get_current_config() {
-            {
-                let user_session = UserSession::new(
-                    config.get_session_manager().session_from_request(&req),
-                    config.get_connection(),
-                );
-                req.extensions_mut().insert(user_session);
+        let server = self.server.get_current_config();
+        Box::pin(async move {
+            if let Some(config) = server {
+                {
+                    let user_session = UserSession::new(
+                        config.get_session_manager().session_from_request(&req),
+                        config.get_connection(),
+                    );
+                    req.extensions_mut().insert(user_session.clone());
+                    if let Some(user) = user_session.get_user().await {
+                        // If user is found, insert it into the request extensions for later use
+                        req.extensions_mut().insert(user.as_ref().clone());
+                    }
+                }
             }
-        }
-        next(req)
+            next(req).await
+        })
     }
 }

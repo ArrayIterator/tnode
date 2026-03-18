@@ -174,7 +174,18 @@ impl Uuid {
         UuidCrate::parse_str(u.as_ref()).is_ok()
         // UUID_REGEX.is_match(uuid.as_ref())
     }
-
+    /// Parse a UUID from a string, returning a Result with the parsed UUID or an error if invalid.
+    /// # Example:
+    /// ```rust    /// use crate::cores::generator::uuid::Uuid;
+    /// match Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000") {
+    ///     Ok(uuid) => println!("Parsed UUID: {}", uuid),
+    ///     Err(e) => println!("Error parsing UUID: {}", e),
+    /// }
+    /// ```
+    pub fn parse_str<T: AsRef<str>>(u: T) -> ResultError<UuidCrate> {
+        UuidCrate::parse_str(u.as_ref())
+            .map_err(|_| Error::invalid_input(format!("Invalid UUID for: {}", u.as_ref())))
+    }
     /// Parse a UUID from a string
     /// # Example:
     /// ```rust

@@ -14,7 +14,9 @@ pub struct SessionPayload {
     /// The unique numeric identifier of the USER.
     pub(crate) user_id: u64,
     /// The UNIX timestamp representing the token generation time.
-    pub(crate) timestamp: i64,
+    pub(crate) timestamp: u64,
+    /// The UNIX timestamp representing the token expiration time (derived from `timestamp` + duration).
+    pub(crate) expired_at: u64,
     /// A 16-byte random nonce for cryptographic uniqueness (derived from UUID v4).
     pub(crate) random_16: [u8; 16],
 }
@@ -26,11 +28,25 @@ impl SessionPayload {
     pub fn user_id(&self) -> u64 {
         self.user_id
     }
-    pub fn timestamp(&self) -> i64 {
+    pub fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+    pub fn expired_at(&self) -> u64 {
+        self.expired_at
     }
     pub fn random(&self) -> &[u8; 16] {
         &self.random_16
+    }
+    pub fn is_expired(&self) -> bool {
+        let now = chrono::Utc::now().timestamp() as u64;
+        let timestamp = self.timestamp;
+        let expired = self.expired_at;
+        return timestamp <= 0 || expired <= 0 || timestamp >= now || expired <= now;
+    }
+    pub fn is_need_renew(&self, renew_duration: Duration) -> bool {
+        let now = chrono::Utc::now().timestamp() as u64;
+        let expired = self.expired_at;
+        expired > now && expired - now <= renew_duration.as_secs()
     }
     pub fn is_expired_with(&self, duration: Duration) -> bool {
         if self.timestamp <= 0 {
@@ -63,7 +79,7 @@ pub struct SessionTokenizer {
 }
 
 impl SessionTokenizer {
-    pub const LENGTH: usize = 192;
+    pub const LENGTH: usize = 208;
 
     /// Creates a new instance of the struct with the provided `secret` and `salt`.
     ///
@@ -93,198 +109,62 @@ impl SessionTokenizer {
         }
     }
 
-    /// Combines the secret and salt slices into a single `Vec<u8>`.
-    ///
-    /// # Description
-    /// This function concatenates the byte slices of `self.secret` and `self.salt`
-    /// to produce a combined vector. This is useful for cases where a derived
-    /// key or unique identifier is needed by merging the two values.
-    ///
-    /// # Returns
-    /// A `Vec<u8>` containing the combined byte data of `self.secret` and `self.salt`.
-    ///
-    /// # Example
-    /// ```rust
-    /// let instance = MyStruct {
-    ///     secret: vec![1, 2, 3],
-    ///     salt: vec![4, 5, 6],
-    /// };
-    /// let result = instance.get_combined_key();
-    /// assert_eq!(result, vec![1, 2, 3, 4, 5, 6]);
-    /// ```
     fn get_combined_key(&self) -> Vec<u8> {
         [self.secret.as_slice(), self.salt.as_slice()].concat()
     }
 
-    /// Generates a secure, cryptographically signed token for a given user.
-    ///
-    /// # Parameters
-    /// - `user_id`: A 64-bit unsigned integer representing the user's unique identifier.
-    ///
-    /// # Returns
-    /// - `Ok(SessionPayload)`: A signed, payload hex-encoded token string on success.
-    /// - `Err(ResultError<String>)`: An error object in case of failure during the token generation process.
-    ///
-    /// # Token Structure
-    /// The generated token is a 96-byte buffer, consisting of the following components:
-    /// 1. Bytes 0..16: A random 16-byte value generated using a UUID v4.
-    /// 2. Bytes 16..48: An HMAC-SHA256 binding of `user_id` with a secret key.
-    /// 3. Bytes 48..56: An 8-byte representation of the current UNIX timestamp in seconds (big-endian).
-    /// 4. Bytes 56..64: An 8-byte representation of the `user_id` (big-endian).
-    /// 5. Bytes 64..96: An HMAC-SHA256 signature of the first 64 bytes, using the same secret key.
-    ///
-    /// # Implementation Details
-    /// - The secret key is fetched via the `get_combined_key` method.
-    /// - Unique randomness for the token is achieved using a UUID v4.
-    /// - The function uses HMAC-SHA256 for cryptographic binding and signing.
-    /// - The timestamp ensures the token is time-sensitive and can be validated based on issuance time.
-    /// - The resulting 96-byte buffer is hex-encoded into a string for the final output.
-    ///
-    /// # Errors
-    /// This function can return an error in the following cases:
-    /// - Failure in HMAC-SHA256 computation during `id_binding` or `final_sign`.
-    /// - Any other unexpected failure during token composition.
-    ///
-    /// # Example
-    /// ```rust
-    /// let service = TokenService::new();
-    /// let user_id = 123456789;
-    /// match service.generate(user_id) {
-    ///     Ok(token) => println!("Generated token: {}", token),
-    ///     Err(err) => eprintln!("Token generation failed: {}", err),
-    /// }
-    /// ```
-    pub fn generate(&self, user_id: u64) -> ResultError<SessionPayload> {
+    pub fn generate(&self, user_id: u64, duration: Duration) -> ResultError<SessionPayload> {
         let key = self.get_combined_key();
         let random_16 = *Uuid::new_v4().as_bytes();
-        let now = chrono::Utc::now().timestamp();
+        let now = chrono::Utc::now().timestamp() as u64;
+        let expired_at = now + duration.as_secs();
 
         let time_8 = now.to_be_bytes();
+        let exp_8 = expired_at.to_be_bytes(); // Convert expired_at ke bytes
         let user_8 = user_id.to_be_bytes();
 
         let id_binding = user_8.to_hmac_sha256_fixed(&key)?;
 
-        let mut buffer = [0u8; 96];
+        // Buffer naik jadi 104 bytes untuk menampung exp_8
+        let mut buffer = [0u8; 104];
         buffer[0..16].copy_from_slice(&random_16);
         buffer[16..48].copy_from_slice(&id_binding);
         buffer[48..56].copy_from_slice(&time_8);
-        buffer[56..64].copy_from_slice(&user_8);
+        buffer[56..64].copy_from_slice(&exp_8);      // Masukkan expired_at
+        buffer[64..72].copy_from_slice(&user_8);
 
-        let final_sign = buffer[0..64].to_hmac_sha256_fixed(&key)?;
-        buffer[64..96].copy_from_slice(&final_sign);
+        // Final sign sekarang mencakup bytes 0 sampai 72
+        let final_sign = buffer[0..72].to_hmac_sha256_fixed(&key)?;
+        buffer[72..104].copy_from_slice(&final_sign);
+
         Ok(SessionPayload {
             token: buffer.to_hex(),
             user_id,
             timestamp: now,
             random_16,
+            expired_at: expired_at,
         })
     }
 
-    /// Tokenizes the provided user and returns the token as a `String`.
-    ///
-    /// # Type Parameters
-    /// - `T`: A type that implements `AsRef<dyn UserBase>`. This allows the function to accept
-    ///        any type that can provide a reference to an implementor of the `UserBase` trait.
-    ///
-    /// # Parameters
-    /// - `user`: An instance of type `T` representing the user to be tokenized. The `id()` method
-    ///           of the `UserBase` trait is used to extract the user's ID.
-    ///
-    /// # Returns
-    /// - `Ok(SessionPayload)`: If the user ID is valid (non-negative), the function generates and returns a
-    ///                 token as a `SessionPayload`.
-    /// - `Err(Error)`: If the user ID is invalid (negative), an error of type `Error` with a message
-    ///                 indicating "Invalid user ID" is returned.
-    ///
-    /// # Errors
-    /// - Returns an `Error::invalid_data` if the user ID is less than `0`.
-    ///
-    /// # Example
-    /// ```rust
-    /// let user = SomeUserType { id: 42 }; // Where `SomeUserType` implements `UserBase`
-    /// let token = your_instance.tokenize_user(user);
-    /// match token {
-    ///     Ok(token) => println!("User token: {}", token),
-    ///     Err(e) => eprintln!("Failed to tokenize user: {:?}", e),
-    /// }
-    /// ```
-    ///
-    /// # Notes
-    /// - The `user` parameter is expected to have an `id()` method (provided by the `UserBase` trait)
-    ///   to fetch the user ID.
-    /// - The user ID is expected to be a non-negative integer. Negative IDs are rejected.
-    pub fn generate_with(&self, user: &impl UserBase) -> ResultError<SessionPayload> {
+    pub fn generate_unchecked(&self, user_id: u64, duration: Duration) -> SessionPayload {
+        self.generate(user_id, duration).unwrap()
+    }
+
+    pub fn generate_with(&self, user: &impl UserBase, duration: Duration) -> ResultError<SessionPayload> {
         let user = user.id();
         if user < 0 {
             return Err(Error::invalid_data("Negative user id is not allowed"));
         }
-        self.generate(user as u64)
+        let user = user as u64;
+        self.generate(user, duration)
     }
 
-    /// Splits and validates a hexadecimal token, extracting its payload if successful.
-    ///
-    /// The method performs the following operations:
-    /// 1. Validates the length of the input `token_hex`.
-    /// 2. Decodes the hexadecimal string into raw bytes.
-    /// 3. Verifies the outer HMAC signature to check data integrity.
-    /// 4. Parses and extracts the random nonce, timestamp, and user ID from the payload.
-    /// 5. Verifies the inner HMAC signature to ensure identity linkage.
-    ///
-    /// ## Arguments
-    ///
-    /// * `token_hex` - A string slice containing a hexadecimal token that needs to be split and verified.
-    ///
-    /// ## Returns
-    ///
-    /// Returns a `Result` containing:
-    /// - `Ok(SessionPayload)` consisting of:
-    ///   - `user_id` (u64): The ID of the user extracted from the token.
-    ///   - `timestamp` (i64): The session timestamp extracted from the token.
-    ///   - `random_16` ([u8; 16]): A randomly generated 16-byte nonce.
-    /// - `Err(Error)` in case of:
-    ///   - Invalid token length.
-    ///   - Errors during hexadecimal decoding.
-    ///   - Outer signature verification failures.
-    ///   - Errors parsing the payload slices.
-    ///   - Inner signature verification failures.
-    ///
-    /// ## Errors
-    ///
-    /// Possible errors include:
-    /// - `Error::invalid_range`: When the token has an incorrect length.
-    /// - `Error::invalid_data`: When hexadecimal decoding fails.
-    /// - `Error::invalid_length`: When HMAC initialization fails.
-    /// - `Error::overflow`: When slicing the payload encounters issues.
-    /// - `Error::permission_denied`: When either outer or inner signature verification fails.
-    /// - `Error::other`: For other unexpected errors during HMAC initialization.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// let token_hex = "abc123..."; // Example hexadecimal token
-    /// let parser = TokenParser::new();
-    /// match parser.split(token_hex) {
-    ///     Ok(payload) => {
-    ///         println!("User ID: {}", payload.user_id);
-    ///         println!("Timestamp: {}", payload.timestamp);
-    ///         // Use the extracted session payload
-    ///     }
-    ///     Err(e) => {
-    ///         eprintln!("Error processing token: {}", e);
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// This method ensures strong validation and integrity checks, making it suitable for secure
-    /// session handling applications.
     pub fn parse(&self, token_hex: &str) -> ResultError<SessionPayload> {
         if token_hex.len() != Self::LENGTH {
-            return Err(Error::invalid_range(
-                "Token validation failed: incorrect string length",
-            ));
+            return Err(Error::invalid_range("Token validation failed: incorrect string length"));
         }
 
-        // Standard library hexadecimal decoding
+        // Hex decoding (tetap sama)
         let bytes = (0..token_hex.len())
             .step_by(2)
             .map(|i| {
@@ -294,50 +174,39 @@ impl SessionTokenizer {
             .collect::<ResultError<Vec<u8>>>()?;
 
         let key = self.get_combined_key();
-        let payload_part = &bytes[0..64];
-        let outer_signature = &bytes[64..96];
+        // Payload sekarang 72 bytes, Signature 32 bytes terakhir
+        let payload_part = &bytes[0..72];
+        let outer_signature = &bytes[72..104];
 
-        // 1. Verify Outer Signature (Integrity Check)
+        // 1. Verify Outer Signature
         let mut mac_outer = HmacSha256::new_from_slice(&key)
             .map_err(|e| Error::invalid_length(format!("HMAC initialization failed: {}", e)))?;
         mac_outer.update(payload_part);
 
         if mac_outer.verify_slice(outer_signature).is_err() {
-            return Err(Error::permission_denied(
-                "Token integrity check failed: outer signature mismatch",
-            ));
+            return Err(Error::permission_denied("Token integrity check failed: outer signature mismatch"));
         }
 
-        // 2. Safely Extract Components
-        let random_16: [u8; 16] = payload_part[0..16]
-            .try_into()
-            .map_err(|_| Error::overflow("Internal slicing error: nonce"))?;
+        // 2. Extract Components
+        let random_16: [u8; 16] = payload_part[0..16].try_into().unwrap();
         let inner_signature = &payload_part[16..48];
-        let time_8: [u8; 8] = payload_part[48..56]
-            .try_into()
-            .map_err(|_| Error::overflow("Internal slicing error: timestamp"))?;
-        let user_8: [u8; 8] = payload_part[56..64]
-            .try_into()
-            .map_err(|_| Error::overflow("Internal slicing error: user_id"))?;
-
+        let timestamp = u64::from_be_bytes(payload_part[48..56].try_into().unwrap());
+        let expired_at = u64::from_be_bytes(payload_part[56..64].try_into().unwrap());
+        let user_8: [u8; 8] = payload_part[64..72].try_into().unwrap();
         let user_id = u64::from_be_bytes(user_8);
-        let timestamp = i64::from_be_bytes(time_8);
 
-        // 3. Verify Inner Signature (Identity Binding Check)
-        let mut mac_inner = HmacSha256::new_from_slice(&key)
-            .map_err(|_| Error::other("HMAC initialization failed"))?;
+        // 3. Verify Inner Signature
+        let mut mac_inner = HmacSha256::new_from_slice(&key).map_err(|_| Error::other("HMAC Error"))?;
         mac_inner.update(&user_8);
-
         if mac_inner.verify_slice(inner_signature).is_err() {
-            return Err(Error::permission_denied(
-                "Identity binding check failed: inner signature mismatch",
-            ));
+            return Err(Error::permission_denied("Identity binding check failed"));
         }
 
         Ok(SessionPayload {
             token: token_hex.to_string(),
             user_id,
             timestamp,
+            expired_at,
             random_16,
         })
     }
