@@ -20,18 +20,17 @@ use core::convert::From;
 use log::{debug, info, warn};
 use parking_lot::{RwLock};
 use rustls::crypto::ring;
-use rustls_pki_types::PrivateKeyDer;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::fs::File;
-use std::io::BufReader;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
+use arc_swap::ArcSwap;
 use tokio::sync::broadcast::Receiver;
+use crate::factory::ssl_storage::SSLStorage;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub struct TcpSocket {
@@ -89,6 +88,7 @@ pub struct Server {
     tcp_socket: Arc<RwLock<Option<TcpSocket>>>,
     start_counter: Arc<AtomicUsize>,
     next_auto_clean: Arc<AtomicIsize>,
+    ssl_storage: Arc<ArcSwap<Option<SSLStorage>>>
 }
 
 impl Server {
@@ -113,6 +113,7 @@ impl Server {
             tcp_socket: Arc::new(RwLock::new(None)),
             start_counter: Arc::new(AtomicUsize::new(0)),
             next_auto_clean: Arc::new(AtomicIsize::new(-1)),
+            ssl_storage: Arc::new(ArcSwap::new(Arc::new(None)))
         }
     }
 
@@ -398,62 +399,11 @@ impl Server {
             })?;
         }
         ring::default_provider().install_default().ok();
-        let make_ssl_config = || -> ResultError<rustls::ServerConfig> {
-            let cert_file = ssl.cert();
-            let key_file = ssl.key();
-            debug!(target: "factory", "Loading SSL certificate from {}", cert_file);
-            let cert = File::open(&cert_file).map_err(|e| {
-                Error::invalid_data(format!(
-                    "Can not open certificate file for {}: {}",
-                    &cert_file, e
-                ))
-            })?;
-            let key = File::open(&key_file).map_err(|e| {
-                Error::invalid_data(format!(
-                    "Can not open certificate key file for {}: {}",
-                    &key_file, e
-                ))
-            })?;
-            let mut cert_reader = BufReader::new(&cert);
-            let mut key_reader = BufReader::new(&key);
-            let mut certs = Vec::new();
-            for c in rustls_pemfile::certs(&mut cert_reader) {
-                certs.push(c.map_err(|e| {
-                    Error::invalid_data(format!(
-                        "Can not load certificate file for {}: {}",
-                        cert_file, e
-                    ))
-                })?);
-            }
-
-            debug!(target: "factory", "Loading SSL private key from {}", key_file);
-            let key = rustls_pemfile::read_all(&mut key_reader)
-                .filter_map(|item| match item {
-                    Ok(rustls_pemfile::Item::Pkcs1Key(key)) => Some(PrivateKeyDer::Pkcs1(key)),
-                    Ok(rustls_pemfile::Item::Pkcs8Key(key)) => Some(PrivateKeyDer::Pkcs8(key)),
-                    Ok(rustls_pemfile::Item::Sec1Key(key)) => Some(PrivateKeyDer::Sec1(key)),
-                    _ => None,
-                })
-                .next()
-                .ok_or_else(|| {
-                    Error::invalid_data(format!("No private key found in {}", key_file))
-                })?;
-            let mut config = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)
-                .map_err(|e| {
-                    Error::invalid_data(format!("Can not create SSL Server config: {}", e))
-                })?;
-            config.session_storage =
-                rustls::server::ServerSessionMemoryCache::new(ssl.session_cache());
-            config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-            Ok(config)
-        };
-
-        let ssl_config: rustls::ServerConfig;
         if has_ssl && !ssl_binding.is_empty() {
             debug!(target: "factory", "Binding SSL configuration to addresses: {:?}", ssl_binding);
-            ssl_config = make_ssl_config()?;
+            let ssl_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_cert_resolver(config.get_ssl_storage());
             for target in &ssl_binding {
                 let target_string = format!("{:?}", target);
                 server = server
@@ -463,7 +413,8 @@ impl Server {
                         self.processing.store(false, Ordering::SeqCst);
                         Error::permission_denied(format!(
                             "Failed to listen on {:?}: {}",
-                            target_string, e
+                            target_string,
+                            e
                         ))
                     })?;
             }

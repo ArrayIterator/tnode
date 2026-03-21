@@ -11,7 +11,7 @@ use instant_acme::{
     ChallengeStatus, Identifier, NewOrder, OrderStatus, RetryPolicy,
 };
 use log::warn;
-use rcgen::{CertificateParams, CertificateSigningRequest, KeyPair};
+use rcgen::{CertificateParams, CertificateSigningRequest, KeyPair, SigningKey};
 use rustls_pemfile::certs;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
@@ -19,7 +19,7 @@ use std::io::Cursor;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
-use x509_certificate::X509Certificate;
+use x509_certificate::{CapturedX509Certificate, X509Certificate};
 
 pub const RENEW_EXPIRED_DAYS: usize = 30;
 pub const MIN_RENEW_EXPIRED_DAYS: usize = 7; // - 7days
@@ -381,10 +381,27 @@ impl Acme {
             }
         }
         let key = key.to_keypair()?;
-        let pub_pem = cert.public_key_data();
-        let pubkey_key_pem = key.public_key_raw().to_vec();
-        if pub_pem != pubkey_key_pem {
-            warn!(target: "acme", "X509 Certificate Public Key Mismatched");
+        if let Ok(uvec8) = cert.encode_ber() {
+            match CapturedX509Certificate::from_der(uvec8) {
+                Ok(crt) => {
+                    let message = b"verify-key-match-123";
+                    match key.sign(message) {
+                        Ok(signature) => {
+                            if !crt.verify_signed_data(message, signature).is_ok() {
+                                warn!(target: "acme", "X509 Certificate Public Key Mismatched: Signature verification failed");
+                            }
+                        },
+                        Err(e) => {
+                            warn!(target: "acme", "X509 Certificate Public Key Mismatched: {}", e);
+                        },
+                    };
+                },
+                Err(_) => {
+                    warn!(target: "acme", "X509 Certificate Public Key Mismatched");
+                }
+            };
+        } else {
+            warn!(target: "acme", "X509 Certificate Public Key Mismatched: Failed to encode certificate");
         }
         let common_name = cert
             .subject_common_name()

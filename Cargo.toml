@@ -66,7 +66,7 @@ lettre = { version = "0.11", default-features = false, features = ["tokio1-rustl
 
 # Cryptography
 bcrypt = "0.19"
-rustls = { version = "0.23", features = ["aws-lc-rs"] }
+rustls = { version = "0.23", features = ["aws-lc-rs", "std"] }
 totp-rs = { version = "5.7", features = ["qr", "steam", "otpauth"] }
 hmac = "0.12"
 sha1 = "0.10"
@@ -120,6 +120,7 @@ php_serde = "0.6"
 walkdir = "2.5"
 fs2 = "0.4"
 bytes = "1.11"
+arc-swap = { version = "1.8.2", features = ["weak"] }
 
 [profile.release]
 lto = true

@@ -9,6 +9,10 @@ app:
   # development or production
   # Default: production
   mode: "production"
+  # Dashboard path
+  # Default Dashboard
+  # Allowed characters [a-z0-9]([a-z0-9_-]?[a-z0-9])? case insensitive
+  dashboard_path: "dashboard"
   # Session name
   #  used to store session id in cookie
   # session name must be ([a-zA-Z0-9_-]+)
@@ -36,14 +40,29 @@ app:
   # SSL Configuration
   # 443 always
   ssl:
+    # Auto create ssl
+    auto_create: bool
+    # Listen SSL Address
     listen:
       - "127.0.0.1:55443"
+    # certificate file path
     cert: ""
+    # certificate key file path
     key: ""
     # SSL Session cache size in MB
     # minimum: 2, maximum: 256
     # default : 32
     ssl_session_cache: 32
+    # SSL certificate config based on domain / IP
+    # default (empty)
+    domains:
+      # Specify per user domains
+      # supported IP
+      # use *.example.com for wildcard
+      "127.0.0.1":
+        cert: ""
+        key: ""
+
   # Max worker
   # default: 0 (auto detect - use available cores)
   workers: 0
@@ -99,10 +118,52 @@ app:
   # Uppercase M as Month, as lowercase m as Minute
   auto_clean_memory_interval: "1H"
 # ----------------------------------------
+# Redis configuration
+# Use Redis
+redis:
+  # Unix socket path
+  # Default: (empty)
+  unix_socket: ""
+  # Redis host
+  # Default: localhost
+  host: localhost
+  # Redis port
+  # Default: 6379
+  port: 6379
+  # Redis username
+  # Default: (empty)
+  username: ""
+  # Redis password
+  # Default: (empty)
+  password: ""
+  # Redis database
+  # minimum: 0, maximum: 16
+  # Default: 0
+  database: 0
+  # Maximum pools
+  # minimum: 1, maximum: 128
+  # Default: 10
+  max_pools: 10
+  # Minimum number of idle connections in the pool
+  # minimum: 1, maximum: 64
+  # Default: 1
+  minimum_idle_connections: 1
+  # Idle connection timeout in seconds
+  # minimum: 1, maximum: 86400 (1 day)
+  # Default: 600
+  idle_timeout: 600
+  # Connection timeout in seconds
+  # minimum: 1, maximum: 3600
+  # Default: 5
+  connect_timeout: 5
+# ----------------------------------------
 # Database configuration
 # Database connection pool settings
 # Use PostgreSQL
 database:
+  # Database driver
+  # postgresql, sqlite, mysql
+  driver: "postgresql"
   # Unix socket path
   # Default: (empty)
   socket: null
@@ -129,6 +190,9 @@ database:
   # Connection acquisition timeout in seconds
   # Default: 1800
   max_lifetime: 1800
+  # Statement timeout in seconds
+  # Default: 5
+  statement_timeout: 5
   # Idle connection timeout in seconds
   # Default: 600
   idle_timeout: 600
@@ -149,23 +213,9 @@ database:
   # Log threshold in seconds
   # Default: 1
   log_threshold: 1
-# ----------------------------------------
-# AI MODELS
-# Model for AI
-# ct2rs: ct2rs model - object based name
-# onnx: onnx model - object based name
-models:
-  # Based On Model Directory
-  ct2rs:
-    # https://huggingface.co/arrayiterator/nllb-200-distilled-1.3B-ct2-int8
-    # https://huggingface.co/arrayiterator/nllb-200-3.3B-ct2-int8
-    nllb-200: ""
-    # https://huggingface.co/arrayiterator/faster-whisper-large-v3-turbo-int8-ct2
-    whisper: ""
-  # Based on Model File Name
-  onnx:
-    # placeholder
-    example: ""
+  # Collation (only for MySQL)
+  # Default: utf8mb4_general_ci
+  collation: "utf8mb4_general_ci"
 # ----------------------------------------
 # Licenses / API Key based on requirements
 #

@@ -32,7 +32,7 @@ use colored::*;
 use log::{debug, trace, warn};
 use path_clean::PathClean;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::os::linux::net::SocketAddrExt;
 use std::os::unix::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -40,6 +40,7 @@ use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 use regex::Regex;
 use crate::cores::database::connection::Connection;
+use crate::factory::ssl_storage::SSLStorage;
 
 static RE_DASHBOARD_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[a-z0-9]([a-z0-9_\-]*[a-z0-9])?$").unwrap()
@@ -50,7 +51,24 @@ static RE_DASHBOARD_PATH_UNWANTED_CHARS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 #[derive(Debug, Clone, Deserialize, Serialize,)]
+pub struct SSLKeyCert {
+    pub(crate) key: String,
+    pub(crate) cert: String,
+}
+
+impl SSLKeyCert {
+    pub fn key(&self) -> String {
+        self.key.clone()
+    }
+    pub fn cert(&self) -> String {
+        self.cert.clone()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize,)]
 pub struct SSLConfig {
+    #[serde(default)]
+    auto_create: bool,
     #[serde(default)]
     listen: Vec<String>,
     #[serde(default)]
@@ -59,6 +77,8 @@ pub struct SSLConfig {
     cert: String,
     #[serde(default)]
     session_cache: usize,
+    #[serde(default)]
+    domains: Option<HashMap<String, SSLKeyCert>>,
     #[serde(flatten)]
     ___flatten: BTreeMap<String, serde_yaml::Value>,
 }
@@ -79,6 +99,12 @@ impl SSLConfig {
     pub fn is_ssl_configured(&self) -> bool {
         !self.listen.is_empty() && !self.key.is_empty() && !self.cert.is_empty()
     }
+    pub fn domains(&self) -> Option<HashMap<String, SSLKeyCert>> {
+        self.domains.clone()
+    }
+    pub fn auto_create(&self) -> bool {
+        self.auto_create
+    }
     pub fn flatten(&self) -> BTreeMap<String, serde_yaml::Value> {
         self.___flatten.clone()
     }
@@ -87,10 +113,12 @@ impl SSLConfig {
 impl Default for SSLConfig {
     fn default() -> Self {
         Self {
+            auto_create: true,
             listen: vec![],
             key: "".to_string(),
             cert: "".to_string(),
             session_cache: DEFAULT_SSL_SESSION_CACHE,
+            domains: None,
             ___flatten: Default::default(),
         }
     }
@@ -303,6 +331,8 @@ pub struct Config {
     csrf_duration: OnceLock<Arc<CsrfDuration>>,
     #[serde(skip)]
     connection: OnceLock<Arc<Connection>>,
+    #[serde(skip)]
+    ssl_storage: OnceLock<Arc<SSLStorage>>,
 }
 
 /// Application configuration struct.
@@ -1197,5 +1227,11 @@ impl Config {
                 Arc::new(self.database().to_connection())
             })
             .clone()
+    }
+
+    pub fn get_ssl_storage(&self) -> Arc<SSLStorage> {
+        self.ssl_storage.get_or_init(||{
+            Arc::new(SSLStorage::new(self.app().ssl.clone()))
+        }).clone()
     }
 }

@@ -414,14 +414,29 @@ app:
   # SSL Configuration
   # 443 always
   ssl:
+    # Auto create ssl
+    auto_create: bool
+    # Listen SSL Address
     listen:
       - "127.0.0.1:55443"
+    # certificate file path
     cert: ""
+    # certificate key file path
     key: ""
     # SSL Session cache size in MB
     # minimum: 2, maximum: 256
     # default : 32
     ssl_session_cache: 32
+    # SSL certificate config based on domain / IP
+    # default (empty)
+    domains:
+        # Specify per user domains
+        # supported IP
+        # use *.example.com for wildcard
+        "127.0.0.1":
+            cert: ""
+            key: ""
+
   # Max worker
   # default: 0 (auto detect - use available cores)
   workers: 0

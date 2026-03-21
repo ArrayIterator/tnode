@@ -214,6 +214,3 @@ ps aux | grep tnode | awk '{print $2}' | xargs -I{} ls -l /proc/{}/exe 2>/dev/nu
 This software is under [Apache License 2.0](LICENSE) (the "License"); you may not use this file except in compliance with the License. You may get a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
-# PLAN
-- Adding dynamic SSL Keys/Cert on Server Factory (Via Swapping ARC)
